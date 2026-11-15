@@ -1,0 +1,88 @@
+name: Mirror releases
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mirror-releases
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: zxsos/HGhubX
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Sync tags from upstream
+        run: |
+          set -euo pipefail
+          git fetch "https://github.com/${UPSTREAM}.git" "refs/tags/*:refs/tags/*" --force
+          git ls-remote --tags origin | sed -E 's#^.*refs/tags/##; s/\^\{\}$//' | sort -u > /tmp/remote_tags.txt
+          git tag --list | sort -u > /tmp/local_tags.txt
+          comm -13 /tmp/remote_tags.txt /tmp/local_tags.txt | while read -r t; do
+            echo "push tag: $t"
+            git push origin "refs/tags/$t"
+          done
+
+      - name: Mirror releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          FORK="${GITHUB_REPOSITORY}"
+          tmp="$(mktemp -d)"
+
+          gh api "repos/${UPSTREAM}/releases?per_page=100" --paginate \
+            -q '.[] | select(.draft == false) | @base64' > "$tmp/rels.txt"
+
+          gh release list -R "$FORK" --limit 1000 --json tagName \
+            -q '.[].tagName' | sort -u > "$tmp/have.txt"
+
+          n=0
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            rel="$(printf '%s' "$line" | base64 -d)"
+            tag="$(jq -r '.tag_name' <<<"$rel")"
+
+            if grep -Fxq "$tag" "$tmp/have.txt"; then
+              echo "skip: $tag"
+              continue
+            fi
+
+            n=$((n + 1))
+            dir="$tmp/a$n"
+            mkdir -p "$dir"
+
+            title="$(jq -r '.name // empty' <<<"$rel")"
+            [ -z "$title" ] && title="$tag"
+            jq -r '.body // ""' <<<"$rel" > "$tmp/body.md"
+
+            args=(--title "$title" --notes-file "$tmp/body.md")
+            if [ "$(jq -r '.prerelease' <<<"$rel")" = "true" ]; then
+              args+=(--prerelease)
+            fi
+
+            echo "create: $tag"
+            gh release create "$tag" -R "$FORK" "${args[@]}"
+
+            if gh release download "$tag" -R "$UPSTREAM" -D "$dir" --clobber 2>/dev/null; then
+              if compgen -G "$dir/*" > /dev/null; then
+                gh release upload "$tag" -R "$FORK" "$dir"/* --clobber
+              fi
+            fi
+          done < "$tmp/rels.txt"
+
+          echo "done"
