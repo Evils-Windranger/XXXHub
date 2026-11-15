@@ -25,6 +25,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          token: ${{ secrets.UPSTREAM_TOKEN }}
 
       - name: Sync tags from upstream
         continue-on-error: true
@@ -35,14 +36,14 @@ jobs:
           grep -Fxvf /tmp/remote_tags.txt /tmp/local_tags.txt | while read -r t; do
             echo "push tag: $t"
             if ! git push origin "refs/tags/$t"; then
-              echo "::warning::tag $t 被拒绝（workflow 文件保护），已跳过"
+              echo "::warning::tag $t 推送失败，已跳过"
             fi
           done
           exit 0
 
       - name: Mirror releases
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.UPSTREAM_TOKEN }}
         run: |
           set -euo pipefail
           FORK="${GITHUB_REPOSITORY}"
