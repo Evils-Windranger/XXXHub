@@ -27,15 +27,18 @@ jobs:
           fetch-tags: true
 
       - name: Sync tags from upstream
+        continue-on-error: true
         run: |
-          set -euo pipefail
           git fetch "https://github.com/${UPSTREAM}.git" "refs/tags/*:refs/tags/*" --force
           git ls-remote --tags origin | sed -E 's#^.*refs/tags/##; s/\^\{\}$//' | sort -u > /tmp/remote_tags.txt
           git tag --list | sort -u > /tmp/local_tags.txt
-          comm -13 /tmp/remote_tags.txt /tmp/local_tags.txt | while read -r t; do
+          grep -Fxvf /tmp/remote_tags.txt /tmp/local_tags.txt | while read -r t; do
             echo "push tag: $t"
-            git push origin "refs/tags/$t"
+            if ! git push origin "refs/tags/$t"; then
+              echo "::warning::tag $t 被拒绝（workflow 文件保护），已跳过"
+            fi
           done
+          exit 0
 
       - name: Mirror releases
         env:
@@ -51,6 +54,8 @@ jobs:
           gh release list -R "$FORK" --limit 1000 --json tagName \
             -q '.[].tagName' | sort -u > "$tmp/have.txt"
 
+          git ls-remote --tags origin | sed -E 's#^.*refs/tags/##; s/\^\{\}$//' | sort -u > "$tmp/remote_tags.txt"
+
           n=0
           while IFS= read -r line; do
             [ -z "$line" ] && continue
@@ -58,7 +63,12 @@ jobs:
             tag="$(jq -r '.tag_name' <<<"$rel")"
 
             if grep -Fxq "$tag" "$tmp/have.txt"; then
-              echo "skip: $tag"
+              echo "skip exists: $tag"
+              continue
+            fi
+
+            if ! grep -Fxq "$tag" "$tmp/remote_tags.txt"; then
+              echo "::warning::tag $tag 不在 fork 中，跳过"
               continue
             fi
 
