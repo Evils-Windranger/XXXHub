@@ -32,6 +32,7 @@ type Props = {
   fs: boolean;
   clean: boolean;
   controlsLocked: boolean;
+  idle: boolean;
   rotated: boolean;
   mode: "home" | "context";
   kind: "video" | "post";
@@ -88,7 +89,7 @@ type Props = {
 };
 
 export default function FeedItemChrome({
-  isActive, isDesktop, fs, clean, controlsLocked, rotated, mode, kind, title, index, effectiveLength, bottomInset,
+  isActive, isDesktop, fs, clean, controlsLocked, idle, rotated, mode, kind, title, index, effectiveLength, bottomInset,
   curEp, duration, meta, post, hevcUrl, preferHevc, setPreferHevc,
   landscapeVideo, capsuleOn, zoom, setZoom,
   liked, collected, likePending, collectPending, heartBurst, likeCount, collectCount,
@@ -134,7 +135,8 @@ export default function FeedItemChrome({
           {index + 1} / {effectiveLength}
         </span>
       )}
-      {!isDesktop && kind === "video" && clean && !controlsLocked && (
+      {/* Fullscreen lock belongs to the auto-hiding control group; non-fullscreen clean mode keeps it visible. */}
+      {!isDesktop && kind === "video" && !controlsLocked && (fs ? !idle : clean) && (
         <Button aria-label={tr("锁定屏幕")} title={tr("锁定屏幕")} onClick={onLock} className="mobile-clean-lock"
           style={{ right: playbackLockRightInset(rotated, fs) }}>
           <ILockF size={19} />

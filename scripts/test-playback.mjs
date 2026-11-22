@@ -610,7 +610,7 @@ async function portraitFitChecks(page, dir) {
     await settingsDialog.waitFor({ state: "hidden" });
   }
 
-  // Rotated landscape fullscreen: the clean-mode lock and the shutdown unlock
+  // Rotated landscape fullscreen: the lock entry and the shutdown unlock
   // must occupy the same stage-local anchor even when the phone has a bottom
   // safe-area inset. The rotated stage maps --sab to its right edge.
   await page.locator(".player-root").evaluate(el => {
@@ -623,16 +623,7 @@ async function portraitFitChecks(page, dir) {
   await page.waitForFunction(() => document.querySelector(".player-root")?.classList.contains("fs-landscape"));
   await page.waitForTimeout(250);
   const qualityBox = await page.locator(".feed-current-quality").boundingBox();
-  assert(qualityBox, "Quality indicator must be visible before clean mode");
-  await page.evaluate(() => {
-    const surface = document.querySelector("[data-mobile-hold-target]");
-    const box = surface.getBoundingClientRect();
-    for (const type of ["pointerdown", "pointerup"]) surface.dispatchEvent(new PointerEvent(type, {
-      bubbles: true, pointerId: 93, pointerType: "touch", button: 0,
-      clientX: box.x + box.width / 2, clientY: box.y + box.height / 2,
-    }));
-  });
-  await page.waitForFunction(() => document.querySelector(".player-root")?.dataset.clean === "true");
+  assert(qualityBox, "Quality indicator must be visible with the fullscreen controls");
   const cleanLock = page.getByRole("button", { name: "锁定屏幕", exact: true });
   await cleanLock.waitFor();
   const cleanBox = await cleanLock.boundingBox();
@@ -667,7 +658,7 @@ async function portraitFitChecks(page, dir) {
   await page.getByText("已解锁", { exact: true }).waitFor();
   await unlock.waitFor({ state: "hidden" });
   assert.equal(await page.locator(".a-toast").count(), 1, "Unlocking must replace the hint instead of stacking");
-  assert.equal(await page.getByRole("button", { name: "锁定屏幕", exact: true }).count(), 0, "Unlock exits clean mode and hides the lock icon");
+  assert.equal(await page.getByRole("button", { name: "锁定屏幕", exact: true }).count(), 1, "Unlock restores the fullscreen controls and their lock entry");
   return { viewport: "390x844", portrait_source: "360x640", portrait_object_fit: portrait.objectFit,
     landscape_default_fit: "contain", landscape_toggle: ["contain", "cover", "contain"], floating_fit_rotate: 0 };
 }
