@@ -62,6 +62,10 @@ try {
 
   const railOrder = await page.locator(".mobile-video-action-rail>button").evaluateAll(buttons => buttons.map(button => button.getAttribute("aria-label")));
   assert.deepEqual(railOrder, ["点赞", "收藏", "评论 89 条", "更多播放设置"]);
+  const commentIcon = page.locator(".mobile-action-comments svg");
+  assert.equal(await commentIcon.getAttribute("fill"), "none");
+  assert.equal(await commentIcon.getAttribute("stroke"), "currentColor");
+  assert.equal(await commentIcon.getAttribute("width"), "27");
   assert.equal(await page.locator(".mobile-playback-episodes").innerText(), "选集 · 全109集");
   assert.equal(await page.locator(".feed-current-quality").innerText(), "HD");
   assert.equal(await page.locator(".mobile-episode-indicator").count(), 0);

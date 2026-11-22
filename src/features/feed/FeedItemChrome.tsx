@@ -6,7 +6,7 @@ import type { Post } from "../../shared/api/types";
 import type { Toast } from "../../shared/model/store";
 import { PlaybackProgress, playbackLockRightInset, type PlaybackClock } from "../playback";
 import {
-  IBack, IChevR, IChevronDown, IChevronUp, ICommentF, IExpand, IFileText,
+  IBack, IChevR, IChevronDown, IChevronUp, IComment, IExpand, IFileText,
   IHeart, IHeartF, IList, ILockF, IMore, IPlayF, IStar, IStarF, IVertSwap, IVol, IVolMute,
 } from "../../shared/ui/icons";
 import { CurrentVideoTags } from "./CurrentVideoTags";
@@ -177,8 +177,8 @@ export default function FeedItemChrome({
             <span className="text-[12px] text-white/90 tabular-nums">{fmt(collectCount)}</span>
           </Button>
           <Button onClick={() => setPanel("comments")} className="mobile-action-comments flex flex-col items-center gap-1 pressable" aria-label={tr("评论 {0} 条", fmt(meta.comment))}>
-            <ICommentF size={26} className="hg-ink hg-ov-shadow" />
-            <span className="text-[12px] hg-ink-2 hg-ov-shadow tabular-nums">{fmt(meta.comment)}</span>
+            <IComment size={27} className="hg-ink hg-ov-shadow" />
+            <span className="text-[12px] text-white/90 tabular-nums">{fmt(meta.comment)}</span>
           </Button>
           <Button onClick={() => setPanel("more")} className="mobile-action-more flex flex-col items-center gap-1 pressable" aria-label={tr("更多播放设置")}>
             <IMore size={26} className="hg-ink hg-ov-shadow" />
@@ -208,7 +208,7 @@ export default function FeedItemChrome({
           </Button>
 
           <Button onClick={() => setPanel("comments")} aria-label={tr("评论 {0} 条", fmt(meta.comment))} className="flex flex-col items-center gap-1 pressable">
-            <ICommentF size={27} className="text-white tsh" />
+            <IComment size={27} className="text-white tsh" />
             <span className="text-[12px] text-white/90 tabular-nums">{fmt(meta.comment)}</span>
           </Button>
 
