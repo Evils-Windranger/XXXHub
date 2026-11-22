@@ -37,7 +37,7 @@ ad-hoc 签名都不应进入仓库或本机脚本输出。
   [`scripts/build-android-tv.mjs`](../../scripts/build-android-tv.mjs)（含 `--android-init` / `--android-build` 临时覆盖与自动清理）、
   [`scripts/patch-android-tv.mjs`](../../scripts/patch-android-tv.mjs)；图标/启动屏：
   `generate-ios-icons.mjs`、`sync-ios-icons.mjs`、`patch-ios-splash.mjs`、
-  `sync-android-icons.mjs`、`patch-android-splash.mjs`。
+  `sync-android-icons.mjs`（同步 `src-tauri/icons/android/` 含 Android 13+ Material You 单色自适应图层 `drawable/ic_launcher_monochrome.xml` 与 `mipmap-anydpi-v26/ic_launcher*.xml`）、`patch-android-splash.mjs`。
 - 本地入口：[`Makefile`](../../Makefile) 的 `check`、`test-rust`、`test-web`、`test-tv`、`test-smoke`、
   `docs`、`budget`、`release-check`。
 
