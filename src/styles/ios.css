@@ -251,7 +251,8 @@ html.theme-light {
 @keyframes ios-dialog-in { from{opacity:0;transform:translateY(12px) scale(.98)} to{opacity:1;transform:none} }
 @keyframes ios-sheet-in { from{transform:translateY(28px);opacity:0} to{transform:none;opacity:1} }
 @media(pointer:coarse) {
-  .ios-button:not([data-card]):not(.ios-overlay-backdrop):not(.win-caption-tool) { min-block-size:44px; min-inline-size:44px; }
+  /* Feed top tools stay compact and align the context search with the quality badge. */
+  .ios-button:not([data-card]):not(.ios-overlay-backdrop):not(.win-caption-tool):not(.feed-context-search) { min-block-size:44px; min-inline-size:44px; }
   .ios-form.flex>.ios-button { min-width:44px; }
   .ios-segmented-items>.ios-button { min-height:44px; }
   .player-control.ios-button { min-width:44px; min-height:44px; }
