@@ -160,6 +160,10 @@ try {
   await page.waitForTimeout(150);
   assert.equal(await page.locator(".feed-current-quality").count(), 0);
   assert.equal(await page.locator(".mobile-fs-controls").count(), 0);
+  assert.equal(await page.locator(".mobile-clean-lock").count(), 0, "Idle fullscreen must hide the clean lock with the other controls");
+  await page.evaluate(() => window.homeControlsProbe.setFsIdle(false));
+  await page.locator(".feed-current-quality").waitFor();
+  await page.locator(".mobile-fs-controls").waitFor();
   const fullscreenCleanLock = await page.locator(".mobile-clean-lock").boundingBox();
   assert.ok(fullscreenCleanLock && fullscreenCleanLock.x + fullscreenCleanLock.width >= 370 && Math.abs(fullscreenCleanLock.y + fullscreenCleanLock.height / 2 - 422) < 4);
   await page.evaluate(() => {
@@ -180,7 +184,7 @@ try {
   await page.screenshot({ path: path.join(output, "home-fullscreen.png") });
   await exitFullscreen.click();
   await page.locator(".mobile-fs-controls").waitFor({ state: "detached" });
-  console.log("✓ fullscreen uses a bottom-right exit, combined time, bounded episode swipes, and a clean-state right-center lock");
+  console.log("✓ fullscreen uses a bottom-right exit, combined time, bounded episode swipes, and a clean lock that follows idle visibility");
 
   await page.getByRole("button", { name: "查看标签 都市，长按可屏蔽" }).click();
   assert.equal(await probe("openedTag"), "都市");
