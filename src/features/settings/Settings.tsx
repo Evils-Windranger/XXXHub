@@ -5,6 +5,7 @@ import { useStore } from "../../shared/model/store";
 import { Modal, Toggle } from "../../shared/ui/ui";
 import LinePicker from "./LinePicker";
 import ProxySettings from "./ProxySettings";
+import SourceManager from "./SourceManager";
 import ContentPreferencesSettings from "./ContentPreferencesSettings";
 import SettingsSection from "./SettingsSection";
 import { UsageAgreementText } from "../../shared/ui/UsageAgreement";
@@ -31,6 +32,8 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
   const [agreementOpen, setAgreementOpen] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
   const [lineOpen, setLineOpen] = useState(false);
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [sourceHint, setSourceHint] = useState("");
   const [lineBase, setLineBase] = useState("");
   const [autoLineOn, setAutoLineOn] = useState(autoLineEnabled);
   const clearBusy = useRef(false);
@@ -67,14 +70,22 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
   useEffect(() => { void initPlaybackLog(); }, []);
 
   const readLine = () => { api.lineState().then((state) => { setLineBase(state.base); setLineError(""); }).catch(() => setLineError(tr("线路读取失败，点击重新选择"))); };
+  const readSource = () => {
+    api.sourceState().then((s) => {
+      const active = s.sources.find((x) => x.active);
+      setSourceHint(active ? tr("已启用：{0}（v{1}）", active.name, active.version) : s.sources.length ? tr("已安装 {0} 个 · 当前使用内置默认源", s.sources.length) : tr("内置默认源"));
+    }).catch(() => setSourceHint(""));
+  };
   useEffect(() => {
-    const sync = () => { readLine(); setAutoLineOn(autoLineEnabled()); };
+    const sync = () => { readLine(); readSource(); setAutoLineOn(autoLineEnabled()); };
     sync();
     window.addEventListener("hg:line-changed", sync);
     window.addEventListener("hg:auto-line-changed", sync);
+    window.addEventListener("hg:source-changed", readSource);
     return () => {
       window.removeEventListener("hg:line-changed", sync);
       window.removeEventListener("hg:auto-line-changed", sync);
+      window.removeEventListener("hg:source-changed", readSource);
     };
   }, []);
 
@@ -249,6 +260,14 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
               </div>
               <IChevR size={15} className="text-mut" />
             </Button>
+            <Button onClick={() => setSourceOpen(true)} className="ios-settings-row text-left pressable">
+              <span className="ios-setting-icon"><ILink size={16} /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[14px] text-on">{tr("视频源插件")}</div>
+                <div className="text-[12px] text-mut truncate">{sourceHint || tr("支持口令、JSON 或 HTTPS 链接导入；未启用时走内置默认源")}</div>
+              </div>
+              <IChevR size={15} className="text-mut" />
+            </Button>
             <div className="ios-settings-row">
               <span className="ios-setting-icon"><IRefresh size={15} /></span>
               <div className="flex-1 min-w-0">
@@ -380,6 +399,7 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
       </div>
 
       <LinePicker open={lineOpen} onClose={() => { setLineOpen(false); readLine(); }} />
+      <SourceManager open={sourceOpen} onClose={() => { setSourceOpen(false); readSource(); }} />
 
       <Modal label={tr("使用条款与免责声明")} open={agreementOpen} onClose={() => setAgreementOpen(false)} width={680}>
         <div className="flex flex-col min-h-0 max-h-[78dvh]">

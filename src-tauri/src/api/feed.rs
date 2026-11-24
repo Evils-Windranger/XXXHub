@@ -8,6 +8,7 @@ use tauri::State;
 
 #[tauri::command]
 pub async fn api_feed(state: State<'_, Api>, page: u32, size: u32) -> Result<Value, String> {
+    if let Some(res) = crate::source::try_home(page, size).await { return res; }
     state.get(&format!("/api/videos?page={page}&size={size}")).await
 }
 
@@ -65,7 +66,10 @@ pub async fn api_tags(state: State<'_, Api>) -> Result<Value, String> {
 
 /// 热门标签：解析官网首页服务端渲染的热门标签列表，与官网集合及顺序一致。
 #[tauri::command]
-pub async fn api_hot_tags(_state: State<'_, Api>) -> Result<Value, String> { crate::search_hot::fetch_hot_tags().await }
+pub async fn api_hot_tags(_state: State<'_, Api>) -> Result<Value, String> {
+    if let Some(res) = crate::source::try_hot_tags().await { return res; }
+    crate::search_hot::fetch_hot_tags().await
+}
 
 /// 按标签取短剧：后端按中文标签名匹配；默认按官网标签页 `latest` 排序，社区标签需使用 api_post_tag。
 #[tauri::command]
@@ -141,22 +145,11 @@ pub async fn api_rank(state: State<'_, Api>, kind: String) -> Result<Value, Stri
 /// `type` 省略时后端默认只搜短剧；吃瓜帖必须显式传 `type=post`，
 /// 否则搜「吃瓜频道关键词」永远是空结果（issue #34）。
 #[tauri::command]
-pub async fn api_search(
-    state: State<'_, Api>,
-    q: String,
-    page: u32,
-    size: u32,
-    kind: Option<String>,
-) -> Result<Value, String> {
+pub async fn api_search(state: State<'_, Api>, q: String, page: u32, size: u32, kind: Option<String>) -> Result<Value, String> {
+    if let Some(res) = crate::source::try_search(&q, page, size, kind.as_deref()).await { return res; }
     let encoded: String = url::form_urlencoded::byte_serialize(q.as_bytes()).collect();
-    let scope = match kind.as_deref() {
-        Some("post") => "&type=post",
-        Some("video") => "&type=video",
-        _ => "",
-    };
-    state
-        .get(&format!("/api/search?q={encoded}&page={page}&size={size}{scope}"))
-        .await
+    let scope = match kind.as_deref() { Some("post") => "&type=post", Some("video") => "&type=video", _ => "" };
+    state.get(&format!("/api/search?q={encoded}&page={page}&size={size}{scope}")).await
 }
 
 /// 热搜榜：解析官网搜索页服务端渲染的热搜影片列表。

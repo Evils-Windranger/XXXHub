@@ -26,6 +26,7 @@ mod proxy;
 mod publish_parser;
 mod search_hot;
 mod session;
+mod source;
 mod updater;
 
 use api::Api;
@@ -113,6 +114,7 @@ pub fn run() {
                 // 上次选择的线路（设置 → 线路）在启动时恢复
                 net::bind_base(&dir);
                 playback_log::bind(&dir);
+                source::bind(&dir);
                 let state: tauri::State<Api> = app.state();
                 state.session.bind(dir);
             }
@@ -283,6 +285,15 @@ pub fn run() {
             api::interact::api_like,
             api::interact::api_collect,
             api::interact::api_follow,
+            source::commands::source_state,
+            source::commands::source_import,
+            source::commands::source_activate,
+            source::commands::source_rollback,
+            source::commands::source_remove,
+            source::commands::source_set_allow_untrusted,
+            source::commands::source_export_share_code,
+            source::commands::source_check_update,
+            source::commands::source_test,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

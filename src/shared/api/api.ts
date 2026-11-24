@@ -209,6 +209,20 @@ export const api = {
   proxySet: (mode: ProxyMode, url: string) => call<ProxyState>("proxy_set", { mode, url }),
   proxyTest: (mode: ProxyMode, url: string) => call<ProxyProbe>("proxy_test", { mode, url }),
 
+  /* 视频源插件（QuickJS 沙箱 + 剪贴板口令 / JSON / 链接导入） */
+  sourceState: () => call<SourceStateSnapshot>("source_state"),
+  sourceImport: (input: string, activate = false) =>
+    call<InstalledSourceSummary>("source_import", { input, activate }),
+  sourceActivate: (id: string | null) => call<SourceStateSnapshot>("source_activate", { id }),
+  sourceRollback: (id: string) => call<InstalledSourceSummary>("source_rollback", { id }),
+  sourceRemove: (id: string) => call<SourceStateSnapshot>("source_remove", { id }),
+  sourceSetAllowUntrusted: (allow: boolean) =>
+    call<SourceStateSnapshot>("source_set_allow_untrusted", { allow }),
+  sourceExportShareCode: (id: string) => call<string>("source_export_share_code", { id }),
+  sourceCheckUpdate: (id: string) => call<SourceUpdateOutcome>("source_check_update", { id }),
+  sourceTest: (id: string, query?: string) =>
+    call<SourceTestOutcome>("source_test", { id, query: query ?? null }),
+
   /* 更新检查：对比 GitHub Release 的 tag */
   checkUpdate: (opts?: { edition?: "tv"; currentVersion?: string }) =>
     call<UpdateInfo>("check_update", opts),
@@ -288,6 +302,56 @@ export type LineTryMain = {
   base: string;
   switched: boolean;
   probe: { ok: boolean; base: string; tier: string; ms: number; status: number | null };
+};
+
+export type SourceCapabilities = {
+  home: boolean;
+  search: boolean;
+  catalog: { categories: boolean; tags: boolean; rankings: boolean };
+  detail: { episodes: boolean; related: boolean; comments: boolean };
+  playback: { hls: boolean; mp4: boolean; subtitles: boolean };
+  posts: boolean;
+  account: boolean;
+  lines: boolean;
+};
+
+export type InstalledSourceSummary = {
+  id: string;
+  name: string;
+  version: string;
+  previousVersion?: string | null;
+  description: string;
+  author: string;
+  apiVersion: string;
+  runtimeKind: string;
+  origins: string[];
+  capabilities: SourceCapabilities;
+  updateUrls: string[];
+  signature: { status: "trusted" | "self_signed" | "unsigned" | string; keyId: string; fingerprint: string };
+  installedAt: number;
+  active: boolean;
+};
+
+export type SourceStateSnapshot = {
+  activeSourceId: string | null;
+  allowUntrusted: boolean;
+  sources: InstalledSourceSummary[];
+};
+
+export type SourceUpdateOutcome = {
+  updated: boolean;
+  fromVersion: string;
+  toVersion: string;
+  summary: InstalledSourceSummary;
+};
+
+export type SourceTestOutcome = {
+  ok: boolean;
+  ms: number;
+  method: string;
+  itemCount: number;
+  sampleTitle?: string | null;
+  error?: string | null;
 };
 
 /** `https://a.b/c` → `a.b`（线路展示用） */

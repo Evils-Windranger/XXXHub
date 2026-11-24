@@ -4,45 +4,17 @@ use super::Api;
 use serde_json::{json, Value};
 use tauri::State;
 
+use crate::source::commands::{has_play_url, normalize_play_info};
+
 #[tauri::command]
 pub async fn api_video(state: State<'_, Api>, id: i64) -> Result<Value, String> {
+    if let Some(res) = crate::source::try_detail(id).await { return res; }
     state.get(&format!("/api/videos/{id}")).await
-}
-
-fn non_empty(v: Option<&Value>) -> Option<&Value> {
-    v.filter(|x| !x.is_null() && x.as_str().is_some_and(|s| !s.trim().is_empty()))
-}
-
-/// 把新接口返回的 streams.main / streams.hevc 回填到 video_url / video_url_hevc，
-/// 前端只认 video_url，旧字段缺失时也兼容。
-fn normalize_play_info(info: &mut Value) {
-    let Some(obj) = info.as_object_mut() else { return };
-    for (field, key) in [("video_url", "main"), ("video_url_hevc", "hevc")] {
-        let url = obj
-            .get("streams")
-            .and_then(|st| st.get(key))
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.trim().is_empty())
-            .map(str::to_owned);
-        if let Some(url) = url {
-            if non_empty(obj.get(field)).is_none() {
-                obj.insert(field.into(), json!(url));
-            }
-        }
-    }
-    if non_empty(obj.get("video_url")).is_none() {
-        if let Some(hevc) = non_empty(obj.get("video_url_hevc")).cloned() {
-            obj.insert("video_url".into(), hevc);
-        }
-    }
-}
-
-fn has_play_url(info: &Value) -> bool {
-    non_empty(info.get("video_url")).is_some() || non_empty(info.get("video_url_hevc")).is_some()
 }
 
 #[tauri::command]
 pub async fn api_play(state: State<'_, Api>, id: i64, ep: u32) -> Result<Value, String> {
+    if let Some(res) = crate::source::try_play(id, ep).await { return res; }
     // 优先走新接口；失败或没有可用地址时退回旧接口，两者都不行就返回新接口的结果/错误。
     let primary = state
         .post(

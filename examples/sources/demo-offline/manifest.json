@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "com.hghubx.demo-offline",
+  "name": "离线契约示例源",
+  "version": "1.0.0",
+  "apiVersion": "1",
+  "description": "零网络请求的离线示例视频源，用于快速体验 hghubx-src:// 口令导入与 QuickJS 沙箱切换",
+  "author": "HGhubX",
+  "runtime": {
+    "kind": "quickjs",
+    "entry": "source.js"
+  },
+  "network": {
+    "origins": [],
+    "mediaOrigins": [],
+    "publishOrigins": []
+  },
+  "capabilities": {
+    "home": true,
+    "search": true,
+    "catalog": {
+      "categories": false,
+      "tags": true,
+      "rankings": false
+    },
+    "detail": {
+      "episodes": true,
+      "related": false,
+      "comments": false
+    },
+    "playback": {
+      "hls": true,
+      "mp4": true,
+      "subtitles": false
+    },
+    "posts": false,
+    "account": false,
+    "lines": false
+  }
+}

