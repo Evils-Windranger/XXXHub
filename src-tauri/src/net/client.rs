@@ -187,6 +187,7 @@ pub(super) fn cached_client(cache: &ClientCache, key: &str, now: Instant) -> Opt
 
 /// 缓存按模式、主机和端口隔离；有效期内仅复用已经检查并固定地址的客户端。
 /// 到期后重新检查全部 DNS 答案，不使用旧连接绕过新的目标检查。
+#[allow(dead_code)]
 pub(super) async fn client_for(raw: &str) -> Result<(url::Url, Arc<reqwest::Client>), String> {
     client_for_dns(raw, false).await
 }

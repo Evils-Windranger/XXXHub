@@ -24,6 +24,8 @@ function sha256Hex(text) {
 function canonicalPayload(pkg) {
   const m = pkg.manifest;
   const net = m.network || {};
+  const d = m.media?.imageDecrypt;
+  const imgdec = d ? `${d.algorithm}:${d.key}:${d.iv}` : "";
   return Buffer.from(
     [
       "hghubx-source-v1",
@@ -35,6 +37,7 @@ function canonicalPayload(pkg) {
       `media=${(net.mediaOrigins || []).join(",")}`,
       `publish=${(net.publishOrigins || []).join(",")}`,
       `updates=${(pkg.updateUrls || []).join(",")}`,
+      `imgdec=${imgdec}`,
       `code_sha256=${sha256Hex(pkg.code)}`,
       "",
     ].join("\n"),

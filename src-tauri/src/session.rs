@@ -62,19 +62,19 @@ mod tests {
     fn credentials_are_bound_to_origin() {
         let store = SessionStore::new();
         store.set(
-            "https://huangguoai.com",
+            "https://primary.example",
             "secret-token".into(),
             json!({"id": 1}),
         );
         assert_eq!(
-            store.token("https://huangguoai.com").as_deref(),
+            store.token("https://primary.example").as_deref(),
             Some("secret-token")
         );
-        assert_eq!(store.token("https://huangguoai.ai"), None);
+        assert_eq!(store.token("https://landing.example"), None);
         assert_eq!(store.token("https://evil.example"), None);
         assert!(store.user("https://evil.example").is_null());
         store.clear();
-        assert_eq!(store.token("https://huangguoai.com"), None);
+        assert_eq!(store.token("https://primary.example"), None);
     }
 
     #[test]
@@ -96,8 +96,8 @@ mod tests {
         let store = SessionStore::new();
         *store.current.lock().unwrap() =
             serde_json::from_str(r#"{"token":"legacy","user":{"id":1}}"#).unwrap();
-        assert_eq!(store.token("https://huangguoai.com"), None);
-        assert!(store.user("https://huangguoai.com").is_null());
+        assert_eq!(store.token("https://primary.example"), None);
+        assert!(store.user("https://primary.example").is_null());
     }
 
     #[test]
@@ -142,13 +142,13 @@ mod tests {
     // callers inject `lines::is_fixed || lines::is_trusted_mirror`), so they do
     // not depend on which fixed lines exist or on the process-global mirror set.
     fn trusted_pair(origin: &str) -> bool {
-        matches!(origin, "https://huangguoai.com" | "https://mirror-a.example")
+        matches!(origin, "https://primary.example" | "https://mirror-a.example")
     }
 
     #[test]
     fn trusted_rebase_moves_session_and_bumps_revision() {
         let store = SessionStore::new();
-        let old_origin = "https://huangguoai.com";
+        let old_origin = "https://primary.example";
         let new_origin = "https://mirror-a.example";
         store.set(old_origin, "secret-token".into(), json!({"id": 1}));
         let before = store.snapshot(old_origin).unwrap();
@@ -176,7 +176,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let store = SessionStore::new();
         store.bind(dir.clone());
-        store.set("https://huangguoai.com", "secret-token".into(), json!({"id": 1}));
+        store.set("https://primary.example", "secret-token".into(), json!({"id": 1}));
         assert!(store.rebase_if_trusted("https://mirror-a.example", trusted_pair));
         let on_disk: Session =
             serde_json::from_str(&std::fs::read_to_string(dir.join("session.json")).unwrap())
@@ -190,9 +190,9 @@ mod tests {
     fn rebase_refuses_untrusted_endpoints_in_both_directions() {
         for (old_origin, new_origin) in [
             // Trusted -> custom/untrusted must not hand the token over.
-            ("https://huangguoai.com", "https://custom.example"),
+            ("https://primary.example", "https://custom.example"),
             // Custom/untrusted -> trusted must not smuggle credentials in either.
-            ("https://custom.example", "https://huangguoai.com"),
+            ("https://custom.example", "https://primary.example"),
             // Unknown mirror -> trusted mirror.
             ("https://unpublished.example", "https://mirror-a.example"),
         ] {
@@ -219,14 +219,14 @@ mod tests {
         *store.current.lock().unwrap() =
             serde_json::from_str(r#"{"token":"legacy","user":{"id":1}}"#).unwrap();
         assert_eq!(store.stored_origin(), None);
-        assert!(!store.rebase_if_trusted("https://huangguoai.com", trusted_pair));
-        assert_eq!(store.token("https://huangguoai.com"), None);
+        assert!(!store.rebase_if_trusted("https://primary.example", trusted_pair));
+        assert_eq!(store.token("https://primary.example"), None);
     }
 
     #[test]
     fn rebase_to_the_same_origin_keeps_the_revision() {
         let store = SessionStore::new();
-        let origin = "https://huangguoai.com";
+        let origin = "https://primary.example";
         store.set(origin, "secret-token".into(), json!({"id": 1}));
         let before = store.snapshot(origin).unwrap();
         assert!(store.rebase_if_trusted(origin, trusted_pair));
@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn rebase_or_clear_keeps_trusted_and_drops_untrusted() {
         let store = SessionStore::new();
-        store.set("https://huangguoai.com", "secret-token".into(), json!({"id": 1}));
+        store.set("https://primary.example", "secret-token".into(), json!({"id": 1}));
         store.rebase_or_clear("https://mirror-a.example", trusted_pair);
         assert_eq!(store.token("https://mirror-a.example").as_deref(), Some("secret-token"));
         // Untrusted target: the session is dropped, never handed over.
@@ -254,14 +254,14 @@ mod tests {
         let published = std::sync::Mutex::new(Vec::<String>::new());
         store
             .reconcile_with(
-                "https://huangguoai.com",
-                || "https://huangguoai.com".to_string(),
+                "https://primary.example",
+                || "https://primary.example".to_string(),
                 |origin| {
-                    origin == "https://huangguoai.com"
+                    origin == "https://primary.example"
                         || published.lock().unwrap().iter().any(|item| item == origin)
                 },
                 |origin| {
-                    if origin != "https://huangguoai.com" {
+                    if origin != "https://primary.example" {
                         published.lock().unwrap().push("https://mirror-a.example".into());
                     }
                     std::future::ready(())
@@ -269,7 +269,7 @@ mod tests {
             )
             .await;
         assert_eq!(
-            store.token("https://huangguoai.com").as_deref(),
+            store.token("https://primary.example").as_deref(),
             Some("secret-token")
         );
     }

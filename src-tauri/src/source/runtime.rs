@@ -68,7 +68,7 @@ pub(crate) async fn host_http_request(
     timeout_secs: u64,
 ) -> Result<Value, String> {
     let method_upper = method.trim().to_ascii_uppercase();
-    if !matches!(method_upper.as_str(), "GET" | "POST" | "HEAD") {
+    if !matches!(method_upper.as_str(), "GET" | "POST" | "HEAD" | "PUT" | "DELETE") {
         return Err(format!("不支持的 HTTP 方法：{method_upper}"));
     }
     if let Some(b) = body {
@@ -118,7 +118,7 @@ pub(crate) async fn host_http_request(
             }
         }
         if let Some(b) = body {
-            if method_upper == "POST" {
+            if matches!(method_upper.as_str(), "POST" | "PUT" | "DELETE") {
                 req = req.body(b.to_string());
             }
         }
@@ -437,6 +437,7 @@ const HOST_SHIM_JS: &str = r#"
   }
   globalThis.host = Object.freeze({
     info: Object.freeze(JSON.parse(raw.infoJson)),
+    auth: Object.freeze({ token: raw.authToken || null }),
     fetch(req) {
       return unwrap(raw.fetch(JSON.stringify(req || {})));
     },
@@ -478,6 +479,18 @@ pub async fn invoke_source(
     input: Value,
     timeout_secs: Option<u64>,
 ) -> Result<Value, String> {
+    invoke_source_with_ctx(store, pkg, method, input, None, None, timeout_secs).await
+}
+
+pub async fn invoke_source_with_ctx(
+    store: Arc<SourceStore>,
+    pkg: SourcePackage,
+    method: &str,
+    input: Value,
+    auth_token: Option<String>,
+    base_override: Option<String>,
+    timeout_secs: Option<u64>,
+) -> Result<Value, String> {
     let method_owned = method.to_string();
     let input_json = serde_json::to_string(&input).map_err(|e| format!("序列化输入失败：{e}"))?;
     let handle = tokio::runtime::Handle::current();
@@ -493,14 +506,14 @@ pub async fn invoke_source(
         let ctx = Context::full(&rt).map_err(|e| format!("初始化 QuickJS 上下文失败：{e}"))?;
         let mut allowed_origins = pkg.manifest.network.origins.clone();
         allowed_origins.extend(pkg.manifest.network.publish_origins.clone());
-        let active_line = crate::net::base();
+        allowed_origins.extend(crate::lines::trusted_mirrors_snapshot());
+        let active_line = base_override.unwrap_or_else(crate::net::base);
         if pkg.manifest.capabilities.lines && !active_line.is_empty() {
             if !allowed_origins.iter().any(|o| o.eq_ignore_ascii_case(&active_line)) {
                 allowed_origins.push(active_line.clone());
             }
         }
-        let base_url = if pkg.manifest.capabilities.lines
-            && !active_line.is_empty()
+        let base_url = if !active_line.is_empty()
             && url::Url::parse(&active_line)
                 .ok()
                 .is_some_and(|u| origin_allowed(&u, &allowed_origins))
@@ -541,6 +554,9 @@ pub async fn invoke_source(
             bridge
                 .set("infoJson", info_json)
                 .map_err(|e| format!("写入 infoJson 失败：{e}"))?;
+            bridge
+                .set("authToken", auth_token.unwrap_or_default())
+                .map_err(|e| format!("写入 authToken 失败：{e}"))?;
 
             let fetch_origins = Rc::clone(&allowed_rc);
             let fetch_handle = handle.clone();

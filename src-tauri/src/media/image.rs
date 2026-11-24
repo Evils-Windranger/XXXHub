@@ -1,4 +1,8 @@
-//! Image cache and AES-128-CBC cover decryption.
+//! Image cache and optional plugin-declared AES-128-CBC cover decryption.
+//!
+//! No site-specific decryption key is embedded in the shell; when an imported
+//! source declares `manifest.media.imageDecrypt`, `/img` uses that source's
+//! parameters to decrypt encrypted covers. Plain JPEG/PNG/GIF/WebP pass through.
 
 use crate::net::fetch_bytes;
 use aes::cipher::{BlockDecrypt, KeyInit};
@@ -6,9 +10,6 @@ use aes::Aes128;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex, Weak};
-
-const IMG_KEY: &[u8] = b"f5d965df75336270";
-const IMG_IV: &[u8] = b"97b60394abc2fbe1";
 
 static IMG_CACHE: Lazy<Mutex<HashMap<String, Arc<Vec<u8>>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
@@ -23,13 +24,12 @@ const IMG_CACHE_MAX: usize = 240;
 
 /* ───────────────────────── AES ───────────────────────── */
 
-fn aes_cbc_decrypt(data: &[u8]) -> Option<Vec<u8>> {
+fn aes_cbc_decrypt(data: &[u8], key: &[u8; 16], iv: &[u8; 16]) -> Option<Vec<u8>> {
     if data.is_empty() || data.len() % 16 != 0 {
         return None;
     }
-    let cipher = Aes128::new_from_slice(IMG_KEY).ok()?;
-    let mut prev = [0u8; 16];
-    prev.copy_from_slice(IMG_IV);
+    let cipher = Aes128::new_from_slice(key).ok()?;
+    let mut prev = *iv;
     let mut out = Vec::with_capacity(data.len());
     for chunk in data.chunks(16) {
         let mut ct = [0u8; 16];
@@ -106,9 +106,11 @@ async fn download_image(url: &str, cache_key: &str, req_scope: crate::net::Reque
     let (_, bytes) = fetch_bytes(url).await?;
     let plain = if image_kind(&bytes).is_some() {
         bytes
-    } else {
-        let dec = aes_cbc_decrypt(&bytes).ok_or_else(|| "封面解密失败".to_string())?;
+    } else if let Some((key, iv)) = crate::source::active_image_decrypt() {
+        let dec = aes_cbc_decrypt(&bytes, &key, &iv).ok_or_else(|| "封面解密失败".to_string())?;
         strip_padding(dec)
+    } else {
+        return Err("封面格式无效（当前视频源未声明加密封面参数）".into());
     };
     let kind = image_kind(&plain).ok_or_else(|| "封面格式无效".to_string())?.to_string();
     let arc = Arc::new(plain);
@@ -145,9 +147,10 @@ mod tests {
         let pad = 16 - plain.len() % 16;
         buf.extend(std::iter::repeat_n(pad as u8, pad));
 
-        let cipher = Aes128::new_from_slice(IMG_KEY).expect("key");
-        let mut prev = [0u8; 16];
-        prev.copy_from_slice(IMG_IV);
+        let test_key: [u8; 16] = *b"0123456789abcdef";
+        let test_iv: [u8; 16] = *b"fedcba9876543210";
+        let cipher = Aes128::new_from_slice(&test_key).expect("key");
+        let mut prev = test_iv;
         let mut encrypted = Vec::with_capacity(buf.len());
         for chunk in buf.chunks(16) {
             let mut block = [0u8; 16];
@@ -161,7 +164,7 @@ mod tests {
             prev = out_block;
         }
 
-        let decrypted = aes_cbc_decrypt(&encrypted).expect("decrypt");
+        let decrypted = aes_cbc_decrypt(&encrypted, &test_key, &test_iv).expect("decrypt");
         let stripped = strip_padding(decrypted);
         assert_eq!(stripped, plain);
         assert_eq!(image_kind(&stripped), Some("image/jpeg"));

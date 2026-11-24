@@ -1,7 +1,4 @@
-//! 业务命令：登录 / 列表 / 详情 / 播放 / 互动。
-//!
-//! Commands live in domain modules; `lib.rs` still registers them through
-//! the re-exports below, so Tauri command names stay unchanged.
+//! 业务命令：全部委托给当前激活的视频源插件（QuickJS 沙箱）；未导入源时返回明确错误。
 
 pub(crate) mod account;
 pub(crate) mod feed;
@@ -26,7 +23,7 @@ pub use update::*;
 #[allow(unused_imports)]
 pub use video::*;
 
-use crate::net::{base, edge};
+use crate::net::base;
 use crate::session::{Session, SessionStore};
 use serde_json::Value;
 
@@ -41,36 +38,54 @@ impl Api {
         }
     }
 
-    /// POST 信封：新播放接口 /api/videos/{id}/episodes/{ep}/playback 需要。
-    async fn post(&self, path: &str, body: Option<Value>) -> Result<Value, String> {
+    pub(crate) fn optional_token(&self) -> Option<String> {
         let origin = base();
-        let token = self.session.token(&origin).filter(|_| {
+        if origin.is_empty() {
+            return None;
+        }
+        self.session.token(&origin).filter(|_| {
             !crate::network_policy::strict_security() || crate::net::trusted_auth_origin(&origin)
-        });
-        edge(&origin, "POST", path, body, token.as_deref()).await
+        })
     }
 
-    async fn get(&self, path: &str) -> Result<Value, String> {
-        let origin = base();
-        let token = self.session.token(&origin).filter(|_| {
-            !crate::network_policy::strict_security() || crate::net::trusted_auth_origin(&origin)
-        });
-        edge(&origin, "GET", path, None, token.as_deref()).await
+    pub(crate) async fn source_call(&self, method: &str, input: Value) -> Result<Value, String> {
+        crate::source::invoke_active(method, input, self.optional_token(), None).await
     }
 
-    fn account_session(&self, expected_user_id: Option<i64>, expected_origin: Option<&str>) -> Result<Session, String> {
+    pub(crate) fn account_session(
+        &self,
+        expected_user_id: Option<i64>,
+        expected_origin: Option<&str>,
+    ) -> Result<Session, String> {
         let origin = base();
-        let session = self.session.snapshot(&origin).ok_or_else(|| "请先登录".to_string())?;
+        let session = self
+            .session
+            .snapshot(&origin)
+            .ok_or_else(|| "请先登录".to_string())?;
         if expected_origin.is_some_and(|value| value != origin)
-            || expected_user_id.is_some_and(|value| session.user.get("id").and_then(Value::as_i64) != Some(value)) {
+            || expected_user_id
+                .is_some_and(|value| session.user.get("id").and_then(Value::as_i64) != Some(value))
+        {
             return Err("账号或线路已变化，请重试".into());
         }
         Ok(session)
     }
 
-    async fn account_request(&self, method: &str, path: &str, body: Option<Value>, expected_user_id: Option<i64>, expected_origin: Option<&str>) -> Result<Value, String> {
+    pub(crate) async fn account_source_call(
+        &self,
+        method: &str,
+        input: Value,
+        expected_user_id: Option<i64>,
+        expected_origin: Option<&str>,
+    ) -> Result<Value, String> {
         let session = self.account_session(expected_user_id, expected_origin)?;
-        let result = edge(&session.origin, method, path, body, Some(&session.token)).await?;
+        let result = crate::source::invoke_active(
+            method,
+            input,
+            Some(session.token.clone()),
+            Some(session.origin.clone()),
+        )
+        .await?;
         if base() != session.origin || !self.session.is_current(&session) {
             return Err("账号或线路已变化，请重试".into());
         }

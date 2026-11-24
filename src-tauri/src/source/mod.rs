@@ -19,10 +19,16 @@ pub(crate) fn store_arc() -> Arc<SourceStore> {
 
 pub fn bind(app_data_dir: &Path) {
     STORE.bind(app_data_dir);
+    let origin = active_default_origin();
+    if !origin.is_empty() && crate::net::base().is_empty() {
+        crate::net::sync_base_for_source(&origin);
+    }
 }
 
 #[allow(unused_imports)]
-pub(crate) use commands::{try_detail, try_home, try_hot_tags, try_play, try_search};
+pub(crate) use commands::{
+    active_default_origin, active_image_decrypt, active_origins, invoke_active,
+};
 
 #[cfg(test)]
 mod tests {
@@ -84,6 +90,7 @@ mod tests {
                     account: false,
                     lines: false,
                 },
+                media: None,
             },
             code: code.into(),
             update_urls: vec![],
@@ -252,26 +259,21 @@ module.exports = {
             .unwrap_err();
         assert!(err.contains("超时") || err.contains("interrupted"), "unexpected err: {err}");
 
-        // Verify both shipped example sources load & pass init() in QuickJS (and demo-offline serves items).
         let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        for dir in ["examples/sources/demo-offline", "examples/sources/huangguo"] {
-            let base = repo_root.join(dir);
-            let mut m: SourceManifest = serde_json::from_str(&std::fs::read_to_string(base.join("manifest.json")).unwrap()).unwrap();
-            m.runtime.entry = "inline".into();
-            let code = std::fs::read_to_string(base.join("source.js")).unwrap();
-            let mut ex = SourcePackage { schema_version: 1, manifest: m, code, update_urls: vec![], signature: None };
-            let pkcs8 = B64_STD.decode(DEV_PKCS8_B64).unwrap();
-            sign_for_test(&mut ex, &pkcs8, "exp-dev-2026", true);
-            validate_package(&ex).unwrap();
-            assert_eq!(verify_package(&ex, false).unwrap().status, "trusted");
-            let init_res = invoke_source(store.clone(), ex.clone(), "init", json!({}), Some(5)).await.unwrap();
-            assert_eq!(init_res["ok"], true);
-            if dir.ends_with("demo-offline") {
-                let h = invoke_source(store.clone(), ex.clone(), "home", json!({ "page": 1, "size": 10 }), Some(5)).await.unwrap();
-                assert_eq!(h["items"].as_array().unwrap().len(), 2);
-                let s = invoke_source(store.clone(), ex, "search", json!({ "q": "逆袭", "page": 1, "size": 10 }), Some(5)).await.unwrap();
-                assert_eq!(s["items"].as_array().unwrap().len(), 1);
-            }
-        }
+        let base = repo_root.join("examples/sources/demo-offline");
+        let mut m: SourceManifest = serde_json::from_str(&std::fs::read_to_string(base.join("manifest.json")).unwrap()).unwrap();
+        m.runtime.entry = "inline".into();
+        let code = std::fs::read_to_string(base.join("source.js")).unwrap();
+        let mut ex = SourcePackage { schema_version: 1, manifest: m, code, update_urls: vec![], signature: None };
+        let pkcs8 = B64_STD.decode(DEV_PKCS8_B64).unwrap();
+        sign_for_test(&mut ex, &pkcs8, "exp-dev-2026", true);
+        validate_package(&ex).unwrap();
+        assert_eq!(verify_package(&ex, false).unwrap().status, "trusted");
+        let init_res = invoke_source(store.clone(), ex.clone(), "init", json!({}), Some(5)).await.unwrap();
+        assert_eq!(init_res["ok"], true);
+        let h = invoke_source(store.clone(), ex.clone(), "home", json!({ "page": 1, "size": 10 }), Some(5)).await.unwrap();
+        assert_eq!(h["items"].as_array().unwrap().len(), 2);
+        let s = invoke_source(store.clone(), ex, "search", json!({ "q": "逆袭", "page": 1, "size": 10 }), Some(5)).await.unwrap();
+        assert_eq!(s["items"].as_array().unwrap().len(), 1);
     }
 }

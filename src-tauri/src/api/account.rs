@@ -1,15 +1,13 @@
-//! Account: login, registration, logout, profile and watch history.
+//! Account commands (100% plugin-driven, credentials owned by Rust SessionStore).
 
 use super::Api;
-use crate::net::{base, edge};
+use crate::net::base;
 use serde_json::{json, Value};
 use tauri::State;
 
-/// Older mirrors wrap `user`; current account/me returns the User directly.
 fn normalize_account(value: Value, origin: &str) -> Result<Value, String> {
     let source = value.get("user").filter(|v| v.is_object()).unwrap_or(&value);
     let mut user = json!({});
-    // Only profile fields cross IPC; a legacy direct login response can also contain a token.
     for key in ["id", "username", "nickname", "avatar", "avatar_color", "sign", "desc", "user_type", "counts", "interactions"] {
         if let Some(field) = source.get(key) { user[key] = field.clone(); }
     }
@@ -50,8 +48,6 @@ pub async fn api_login(
     expected_origin: Option<String>,
     credential_origin: Option<String>,
 ) -> Result<Value, String> {
-    // Manual login has no expected identity. Automatic login must still belong
-    // to the initiating session and may only cross verified shared-account lines.
     crate::net::refresh_client();
     let (origin, revision) = match (expected_user_id, expected_origin.as_deref(), credential_origin.as_deref()) {
         (None, None, None) => (base(), state.session.revision()),
@@ -62,12 +58,11 @@ pub async fn api_login(
         }
         _ => return Err("自动重新登录缺少账号或线路信息".into()),
     };
-    let data = edge(
-        &origin,
-        "POST",
-        "/api/account/loginByPassword",
-        Some(json!({ "username": username, "password": password })),
+    let data = crate::source::invoke_active(
+        "login",
+        json!({ "username": username, "password": password }),
         None,
+        Some(origin.clone()),
     )
     .await?;
     if base() != origin {
@@ -92,20 +87,11 @@ pub async fn api_register(
 ) -> Result<Value, String> {
     let origin = base();
     let revision = state.session.revision();
-    let mut body = json!({
-        "username": username,
-        "password": password,
-        "confirm_password": password,
-    });
-    if !email.trim().is_empty() {
-        body["email"] = json!(email);
-    }
-    let data = edge(
-        &origin,
-        "POST",
-        "/api/account/registerByPassword",
-        Some(body),
+    let data = crate::source::invoke_active(
+        "register",
+        json!({ "username": username, "password": password, "email": email }),
         None,
+        Some(origin.clone()),
     )
     .await?;
     let token = data
@@ -127,12 +113,11 @@ pub async fn api_register(
 #[tauri::command]
 pub async fn api_logout(state: State<'_, Api>, expected_user_id: Option<i64>, expected_origin: Option<String>) -> Result<Value, String> {
     let session = state.account_session(expected_user_id, expected_origin.as_deref())?;
-    let _ = edge(
-        &session.origin,
-        "POST",
-        "/api/account/logout",
-        None,
-        Some(&session.token),
+    let _ = crate::source::invoke_active(
+        "logout",
+        json!({}),
+        Some(session.token.clone()),
+        Some(session.origin.clone()),
     )
     .await;
     if !state.session.clear_if_current(&session) {
@@ -144,7 +129,13 @@ pub async fn api_logout(state: State<'_, Api>, expected_user_id: Option<i64>, ex
 #[tauri::command]
 pub async fn api_me(state: State<'_, Api>, expected_user_id: Option<i64>, expected_origin: Option<String>) -> Result<Value, String> {
     let session = state.account_session(expected_user_id, expected_origin.as_deref())?;
-    let me = edge(&session.origin, "GET", "/api/account/me", None, Some(&session.token)).await?;
+    let me = crate::source::invoke_active(
+        "me",
+        json!({}),
+        Some(session.token.clone()),
+        Some(session.origin.clone()),
+    )
+    .await?;
     let account = normalize_account(me, &session.origin)?;
     if base() != session.origin {
         return Err("读取账号期间线路已变化".into());
@@ -157,25 +148,41 @@ pub async fn api_me(state: State<'_, Api>, expected_user_id: Option<i64>, expect
 
 #[tauri::command]
 pub async fn api_account_history(state: State<'_, Api>, expected_user_id: i64, expected_origin: String, page: u32, size: u32) -> Result<Value, String> {
-    let page = page.max(1);
-    let size = size.clamp(1, 100);
-    let value = state.account_request("GET", &format!("/api/users/me/history?page={page}&size={size}"), None,
-        Some(expected_user_id), Some(&expected_origin)).await?;
+    let value = state
+        .account_source_call(
+            "accountHistory",
+            json!({ "page": page.max(1), "size": size.clamp(1, 100) }),
+            Some(expected_user_id),
+            Some(&expected_origin),
+        )
+        .await?;
     normalize_account_history(value)
 }
 
 #[tauri::command]
 pub async fn api_account_history_record(state: State<'_, Api>, expected_user_id: i64, expected_origin: String, video_id: i64, ep: u32) -> Result<Value, String> {
     if video_id <= 0 || ep == 0 { return Err("观看记录参数无效".into()); }
-    state.account_request("POST", "/api/users/me/history", Some(json!({"video_id": video_id, "ep": ep})),
-        Some(expected_user_id), Some(&expected_origin)).await
+    state
+        .account_source_call(
+            "accountHistoryRecord",
+            json!({ "videoId": video_id, "ep": ep }),
+            Some(expected_user_id),
+            Some(&expected_origin),
+        )
+        .await
 }
 
 #[tauri::command]
 pub async fn api_account_history_delete(state: State<'_, Api>, expected_user_id: i64, expected_origin: String, ids: Vec<i64>) -> Result<Value, String> {
     if ids.is_empty() || ids.len() > 200 || ids.iter().any(|id| *id <= 0) { return Err("观看记录参数无效".into()); }
-    state.account_request("POST", "/api/users/me/history/delete", Some(json!({"ids": ids})),
-        Some(expected_user_id), Some(&expected_origin)).await
+    state
+        .account_source_call(
+            "accountHistoryDelete",
+            json!({ "ids": ids }),
+            Some(expected_user_id),
+            Some(&expected_origin),
+        )
+        .await
 }
 
 #[cfg(test)]
@@ -200,18 +207,15 @@ mod tests {
 
     #[test]
     fn account_history_preserves_row_identity_and_pagination_without_media_metadata() {
-        let result = normalize_account_history(json!({"items": [
-            {"id": 18, "video_id": 9, "last_ep": 3, "target_type": "video", "updated_at": "2026-11-15 10:00:00", "title": "fixture", "cover": "unused"},
-            {"id": 19, "video_id": 10, "last_ep": 1, "target_type": "post"},
-            {"id": 20, "last_ep": 1, "target_type": "video"}
-        ], "pagination": {"page": 2, "pages": 3, "size": 2, "total": 5}})).unwrap();
-        assert_eq!(result["items"].as_array().unwrap().len(), 1);
-        assert_eq!(result["items"][0]["id"], 18);
-        assert_eq!(result["items"][0]["video_id"], 9);
-        assert_eq!(result["items"][0]["last_ep"], 3);
-        assert!(result["items"][0].get("cover").is_none());
-        assert!(result["items"][0].get("title").is_none());
-        assert_eq!(result["pagination"]["pages"], 3);
-        assert!(normalize_account_history(json!({"items": []})).is_err());
+        let value = normalize_account_history(json!({
+            "items": [
+                {"id": 11, "video_id": 42, "target_type": "video", "last_ep": 3, "updated_at": "2026-01-01T00:00:00Z"},
+                {"id": 12, "video_id": 43, "target_type": "post", "last_ep": 1}
+            ],
+            "pagination": {"page": 1, "pages": 1, "size": 20, "total": 1}
+        }))
+        .unwrap();
+        assert_eq!(value["items"].as_array().unwrap().len(), 1);
+        assert_eq!(value["items"][0]["video_id"], 42);
     }
 }

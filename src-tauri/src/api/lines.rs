@@ -26,7 +26,7 @@ pub async fn line_cancel() -> Result<(), String> {
 pub async fn line_state() -> Result<Value, String> {
     Ok(json!({
         "base": base(),
-        "default": crate::net::DEFAULT_BASE,
+        "default": crate::source::active_default_origin(),
         "custom": crate::net::is_custom_line(),
         "fixed": crate::lines::fixed(),
     }))
@@ -61,7 +61,11 @@ pub async fn line_custom_set(state: State<'_, Api>, url: String) -> Result<Value
 
 #[tauri::command]
 pub async fn line_reset(state: State<'_, Api>) -> Result<Value, String> {
-    let base = line_set(state, crate::net::DEFAULT_BASE.to_string()).await?;
+    let default_origin = crate::source::active_default_origin();
+    if default_origin.is_empty() {
+        return Err("尚未导入视频源，无默认线路可恢复".into());
+    }
+    let base = line_set(state, default_origin).await?;
     Ok(json!({ "base": base, "custom": false }))
 }
 

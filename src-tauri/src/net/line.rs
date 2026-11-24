@@ -3,11 +3,29 @@ use super::{LineConfig, BASE, BASE_FILE, DEFAULT_BASE};
 use crate::network_policy;
 use serde_json::{json, Value};
 
-/// 当前上游基址。
+/// 当前上游基址（若本地尚未指定线路，则使用当前激活视频源的首个 origin）。
 pub fn base() -> String {
-    BASE.read()
+    let cur = BASE
+        .read()
         .map(|b| b.base.clone())
-        .unwrap_or_else(|_| DEFAULT_BASE.to_string())
+        .unwrap_or_default();
+    if !cur.is_empty() {
+        cur
+    } else {
+        crate::source::active_default_origin()
+    }
+}
+
+/// 切换/激活视频源时同步当前线路基址（不影响显式自定义线路，若源无 origin 则清空）。
+pub fn sync_base_for_source(origin: &str) {
+    if let Ok(mut current) = BASE.write() {
+        let next = normalize_base(origin).unwrap_or_default();
+        if current.base != next {
+            *current = LineConfig { base: next, custom: false };
+            drop(current);
+            refresh_media_scope();
+        }
+    }
 }
 
 pub fn is_custom_line() -> bool {
@@ -27,17 +45,13 @@ pub fn normalize_base(raw: &str) -> Option<String> {
     Some(parsed.origin().ascii_serialization())
 }
 
-/// 哪些 origin 允许携带凭据：固定主站，加上发布页推荐过、且当前可能作为线路的镜像。
-///
-/// 国内网络连不上 `.com`，只能用镜像；镜像和主站是同一后端、同一个账号体系。
-/// huangguoai.ai 只是导航站（API 全 404），不是固定线路，也不授予凭据信任。
-/// 自定义线路必须由用户显式保存；旧格式文件只恢复地址，不自动授予登录权限。
-/// 会话仍绑定 origin；只有可信↔可信切换会经 SessionStore::rebase_if_trusted 改写 origin，
-/// 其余切换不会把已有 token 发送给另一个站点。
+/// 哪些 origin 允许携带凭据：当前激活视频源 manifest 声明的固定线路、
+/// 本进程从激活源发现的可信镜像，或用户显式保存的自定义线路。
 pub fn trusted_auth_origin(origin: &str) -> bool {
-    matches!(origin, "https://huangguoai.com")
-        || crate::lines::is_trusted_mirror(origin)
-        || BASE.read().is_ok_and(|line| line.custom && line.base == origin)
+    !origin.is_empty()
+        && (crate::lines::is_fixed(origin)
+            || crate::lines::is_trusted_mirror(origin)
+            || BASE.read().is_ok_and(|line| line.custom && line.base == origin))
 }
 
 pub(super) fn persisted_base(text: &str) -> Option<String> {

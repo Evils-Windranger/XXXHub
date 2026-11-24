@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { api, type SourceStateSnapshot } from "../shared/api/api";
 import { IHome, IGrid, ISearch, IStar, ISettings, Logo } from "../shared/ui/icons";
 import { useContentPreferences } from "../shared/model/contentPreferences";
 import { contentKey, type TvContent } from "./model";
@@ -23,6 +24,15 @@ const nav = [{id:"home",label:"首页",Icon:IHome},{id:"browse",label:"浏览",I
 export default function TvApp(){
   const tv=useTv(),prefs=useContentPreferences(),playback=usePlaybackPreferences(),hasUpdate=useTvHasUpdate();
   const [tab,setTab]=useState<Tab>("home"),[visited,setVisited]=useState<Tab[]>(["home"]),[stack,setStack]=useState<Route[]>([]);
+  const [sourceState,setSourceState]=useState<SourceStateSnapshot|null|"unsupported">(null);
+  useEffect(()=>{
+    const load=()=>{api.sourceState().then(s=>setSourceState(s&&typeof s==="object"&&Array.isArray(s.sources)?s:"unsupported")).catch(()=>setSourceState("unsupported"));};
+    load();
+    window.addEventListener("hg:source-changed",load);
+    window.addEventListener("hg:line-changed",load);
+    return()=>{window.removeEventListener("hg:source-changed",load);window.removeEventListener("hg:line-changed",load);};
+  },[]);
+  const needsSource=sourceState!==null&&sourceState!=="unsupported"&&!sourceState.activeSourceId;
   const current=stack[stack.length-1],playing=current?.kind==="player";
   const page=current?`${current.kind}:${contentKey(current.content)}`:tab;
   useEffect(()=>{setCatalogPaused(playing);return()=>setCatalogPaused(false);},[playing]);
@@ -49,7 +59,13 @@ export default function TvApp(){
   return <div className="tv-app">
     {!playing&&<nav className="tv-sidebar" aria-label="主导航" data-tv-region="navigation" data-tv-columns="1"><div className="tv-brand"><Logo size={32}/><span>HGhubX <small>TV</small></span></div>{nav.map(({id,label,Icon})=><button key={id} data-tv-focus={`nav-${id}`} className={id==="settings"?"tv-nav-settings":""} aria-label={id==="settings"&&hasUpdate?`${label}（有新版本）`:label} aria-current={!current&&tab===id?"page":undefined} onClick={()=>navigate(id)}><Icon size={26}/><span>{label}</span>{id==="settings"&&hasUpdate&&<em className="tv-update-dot" aria-hidden="true"/>}</button>)}</nav>}
     <main className="tv-main-area" hidden={!!current}>
-      {visited.map(name=><div key={name} hidden={tab!==name} className="tv-page-scroll" data-tv-scroll-id={`page-${name}`}>
+      {needsSource&&tab!=="settings"?(
+        <div className="tv-page-scroll" data-tv-scroll-id="page-source-empty" style={{padding:"48px 56px",maxWidth:760}}>
+          <h1 style={{fontSize:28,marginBottom:12}}>请先导入视频源</h1>
+          <p style={{opacity:.78,lineHeight:1.6,marginBottom:24}}>HGhubX TV 本体不包含内置视频源。请前往「设置 → 视频源」粘贴 hghubx-src:// 口令、JSON 或 HTTPS 链接导入。</p>
+          <button data-tv-focus="goto-settings-source" onClick={()=>navigate("settings")}>前往设置导入视频源</button>
+        </div>
+      ):visited.map(name=><div key={name} hidden={tab!==name} className="tv-page-scroll" data-tv-scroll-id={`page-${name}`}>
         {name==="home"&&<HomePage active={tab==="home"&&!current} onOpen={open}/>}{name==="browse"&&<BrowsePage active={tab==="browse"&&!current} onOpen={open}/>}{name==="search"&&<SearchPage key={tv.sourceKey} source={tv.source} paused={playing||tab!=="search"||!!current} onOpen={open}/>}{name==="library"&&<LibraryPage active={tab==="library"&&!current} onOpen={open}/>}{name==="settings"&&<SettingsPage/>}
       </div>)}
     </main>

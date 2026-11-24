@@ -36,8 +36,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
-/// 默认上游（固定线路 1）。
-pub const DEFAULT_BASE: &str = "https://huangguoai.com";
+/// 默认上游基址（纯壳版本为空，完全由用户导入的视频源 manifest.network.origins 提供）。
+pub const DEFAULT_BASE: &str = "";
 
 /// 当前上游基址（不带结尾斜杠）。可在设置里切到可信镜像或自定义线路，运行时立即生效。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -67,18 +67,17 @@ static CLIENTS: Lazy<Mutex<ClientCache>> = Lazy::new(|| Mutex::new(HashMap::new(
 static MEDIA_DNS_ROUTES: Lazy<Mutex<crate::media_dns::Routes>> =
     Lazy::new(|| Mutex::new(crate::media_dns::Routes::default()));
 static LAST_HEAL: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
-static NEXT_EDGE: AtomicU64 = AtomicU64::new(0);
 static NEXT_REQUEST: AtomicU64 = AtomicU64::new(0);
 
 #[allow(unused_imports)]
 pub use client::{get, refresh_client, UA};
 pub(crate) use client::{build_client, get_with_dns, proxy_active, request_scope, ProxyRoute, RequestScope};
 pub use crate::net_diag::{diagnose, proxy_state, test_proxy};
-pub use edge::{edge, fetch_bytes, fetch_bytes_with_url};
+pub use edge::{fetch_bytes, fetch_bytes_with_url};
 pub(crate) use edge::edge_redirect_target;
 pub use line::{
     base, bind_base, is_custom_line, normalize_base, set_base, set_custom_base,
-    trusted_auth_origin,
+    sync_base_for_source, trusted_auth_origin,
 };
 pub(crate) use proxy_env::{env_proxy_set, gnome_proxy, proxy_override, system_proxy_enabled};
 #[allow(unused_imports)]
@@ -87,7 +86,7 @@ pub use redact::{err_text, heal_client, is_proxy_error, redact_error_proxy_auth,
 #[cfg(test)]
 use client::{cached_client, client_key, media_config_fingerprint, update_media_generation};
 #[cfg(test)]
-use edge::{edge_operation, with_retry};
+use edge::with_retry;
 #[cfg(test)]
 use line::{persisted_base, persisted_line, save_line};
 

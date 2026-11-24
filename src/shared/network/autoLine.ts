@@ -154,7 +154,8 @@ async function check(reason: string): Promise<void> {
     if (health.ok) {
       downStreak = 0;
       step = Math.min(step + 1, HEALTH_STEPS.length - 1);
-      if (hostOf(health.base) !== "huangguoai.com") await tryMain(reason);
+      const ls = await api.lineState().catch(() => null);
+      if (ls?.default && health.base && hostOf(health.base) !== hostOf(ls.default)) await tryMain(reason);
       schedule(HEALTH_STEPS[step]);
       return;
     }

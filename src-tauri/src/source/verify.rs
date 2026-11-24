@@ -48,8 +48,14 @@ pub fn key_fingerprint(raw_pub: &[u8]) -> String {
 /// Deterministic, language-independent signing payload shared with `scripts/pack-source.mjs`.
 pub fn canonical_payload(pkg: &SourcePackage) -> Vec<u8> {
     let m = &pkg.manifest;
+    let img_dec = m
+        .media
+        .as_ref()
+        .and_then(|media| media.image_decrypt.as_ref())
+        .map(|d| format!("{}:{}:{}", d.algorithm, d.key, d.iv))
+        .unwrap_or_default();
     format!(
-        "hghubx-source-v1\nid={}\nversion={}\napi={}\nruntime={}\norigins={}\nmedia={}\npublish={}\nupdates={}\ncode_sha256={}\n",
+        "hghubx-source-v1\nid={}\nversion={}\napi={}\nruntime={}\norigins={}\nmedia={}\npublish={}\nupdates={}\nimgdec={}\ncode_sha256={}\n",
         m.id,
         m.version,
         m.api_version,
@@ -58,6 +64,7 @@ pub fn canonical_payload(pkg: &SourcePackage) -> Vec<u8> {
         m.network.media_origins.join(","),
         m.network.publish_origins.join(","),
         pkg.update_urls.join(","),
+        img_dec,
         sha256_hex(pkg.code.as_bytes()),
     )
     .into_bytes()

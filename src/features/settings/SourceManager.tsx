@@ -99,7 +99,7 @@ export default function SourceManager({ open, onClose }: { open: boolean; onClos
     try {
       setState(await api.sourceActivate(id));
       notifySourceChanged();
-      toast(id ? tr("已启用视频源：{0}", name || id) : tr("已切回内置默认源"), "ok");
+      toast(id ? tr("已启用视频源：{0}", name || id) : tr("已停用视频源"), "ok");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -241,7 +241,7 @@ export default function SourceManager({ open, onClose }: { open: boolean; onClos
             <span className="text-[12px] font-semibold text-dim">{tr("已安装的视频源")}</span>
             {state?.activeSourceId && (
               <Button disabled={actionId === "__builtin__"} onClick={() => void activate(null)} className="text-[12px] text-primary pressable">
-                {tr("切回内置默认源")}
+                {tr("停用当前源")}
               </Button>
             )}
           </div>
@@ -287,7 +287,7 @@ export default function SourceManager({ open, onClose }: { open: boolean; onClos
 
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   {src.active ? (
-                    <Button disabled={!!actionId} onClick={() => void activate(null)} className="h-7 px-2.5 rounded-(--r-sm) bg-s4 text-[12px] text-on pressable">{tr("切回内置默认源")}</Button>
+                    <Button disabled={!!actionId} onClick={() => void activate(null)} className="h-7 px-2.5 rounded-(--r-sm) bg-s4 text-[12px] text-on pressable">{tr("停用当前源")}</Button>
                   ) : (
                     <Button disabled={!!actionId} onClick={() => void activate(src.id, src.name)} className="h-7 px-2.5 rounded-(--r-sm) bg-primary text-[12px] font-medium text-on-primary pressable">{tr("启用")}</Button>
                   )}

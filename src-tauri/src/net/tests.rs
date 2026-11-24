@@ -1,5 +1,4 @@
 use super::*;
-use serde_json::json;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -32,7 +31,7 @@ fn media_fingerprint_changes_with_active_transport_configuration() {
     let other_custom = crate::proxy::Config::for_test("custom", "http://127.0.0.1:7898").unwrap();
     let initial = media_config_fingerprint(DEFAULT_BASE, true, &system, 17);
     // The origin participates even when media URLs happen to be identical.
-    assert_ne!(initial, media_config_fingerprint("https://huangguoai.ai", true, &system, 17));
+    assert_ne!(initial, media_config_fingerprint("https://mirror.example", true, &system, 17));
     assert_ne!(initial, media_config_fingerprint(DEFAULT_BASE, false, &system, 17));
     assert_ne!(initial, media_config_fingerprint(DEFAULT_BASE, true, &system, 18));
     assert_ne!(initial, media_config_fingerprint(DEFAULT_BASE, true, &direct, 17));
@@ -167,20 +166,6 @@ async fn terminal_errors_do_not_retry_but_transient_failures_can_recover() {
     }
 }
 
-#[test]
-fn api_operation_labels_exclude_user_input() {
-    for (path, expected) in [
-        ("/api/videos?page=1&size=10", "feed"),
-        ("/api/videos/category/private?x=secret", "category"),
-        ("/api/videos/42/play?ep=1", "play"),
-        ("/api/search?q=private-search", "search"),
-        ("/api/account/loginByPassword", "account"),
-        ("/unknown/private", "other"),
-    ] {
-        assert_eq!(edge_operation(path), expected);
-    }
-}
-
 #[tokio::test]
 async fn non_idempotent_operations_are_attempted_once() {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -221,17 +206,17 @@ fn pinned_clients_expire_without_extending_the_dns_ttl() {
 
 #[test]
 fn edge_redirects_only_replay_anonymous_reads() {
-    let current = url::Url::parse("https://huangguoai.ai/api/edge/request").unwrap();
+    let current = url::Url::parse("https://old.example/api").unwrap();
     assert_eq!(
         edge_redirect_target(
             &current,
             301,
-            "https://huangguoai.com/api/edge/request",
+            "https://primary.example/api",
             true
         )
         .unwrap()
         .host_str(),
-        Some("huangguoai.com")
+        Some("primary.example")
     );
     assert!(edge_redirect_target(&current, 302, "/next", true).is_ok());
     for status in [301, 302, 303, 307, 308] {
@@ -260,27 +245,24 @@ fn proxy_credentials_and_query_are_redacted() {
 }
 
 #[test]
-fn base_requires_https_origin_and_auth_trust_is_static() {
+fn base_requires_https_origin_and_empty_default_has_no_auth_trust() {
     assert_eq!(
-        normalize_base("https://HUANGGUOAI.COM:443/"),
-        Some(DEFAULT_BASE.into())
+        normalize_base("https://PRIMARY.EXAMPLE:443/"),
+        Some("https://primary.example".into())
     );
     for raw in [
-        "http://huangguoai.com",
-        "https://user:pass@huangguoai.com",
-        "https://huangguoai.com/path",
-        "https://huangguoai.com/?secret=1",
-        "https://huangguoai.com/#fragment",
+        "http://primary.example",
+        "https://user:pass@primary.example",
+        "https://primary.example/path",
+        "https://primary.example/?secret=1",
+        "https://primary.example/#fragment",
         "https://192.168.1.1",
     ] {
         assert_eq!(normalize_base(raw), None, "{raw}");
     }
-    assert!(trusted_auth_origin(DEFAULT_BASE));
-    // huangguoai.ai is a navigation landing page (API returns nginx 404);
-    // it is not an API line and must not carry credential trust.
-    assert!(!trusted_auth_origin("https://huangguoai.ai"));
+    assert!(!trusted_auth_origin(""));
     assert!(!trusted_auth_origin("https://mirror.example"));
-    assert!(!trusted_auth_origin("https://huangguoai.com.evil.example"));
+    assert!(!trusted_auth_origin("https://primary.example.evil.example"));
 }
 
 #[test]
@@ -290,7 +272,7 @@ fn saved_line_is_restored_without_granting_credential_trust() {
         Some("https://legacy-mirror.invalid".into())
     );
     assert!(!trusted_auth_origin("https://legacy-mirror.invalid"));
-    assert_eq!(persisted_base(r#"{"base":"https://huangguoai.com/"}"#), Some(DEFAULT_BASE.into()));
+    assert_eq!(persisted_base(r#"{"base":"https://primary.example/"}"#), Some("https://primary.example".into()));
     for raw in [
         "invalid",
         r#"{"base":123}"#,
@@ -316,7 +298,6 @@ fn custom_line_consent_only_survives_explicit_v2_configuration() {
         assert!(!config.custom);
     }
     assert!(persisted_line(r#"{"v":2,"base":"https://mirror.fixture.invalid/","custom":true}"#).unwrap().custom);
-    assert!(!persisted_line(r#"{"v":2,"base":"https://huangguoai.com","custom":true}"#).unwrap().custom);
 }
 
 #[test]
@@ -333,31 +314,10 @@ fn custom_line_round_trip_and_failed_save_preserve_previous_selection() {
     assert!(save_line(&mut current, LineConfig::default(), Some(&failed_path)).is_err());
     assert_eq!(current, next);
     assert_eq!(persisted_line(&std::fs::read_to_string(&path).unwrap()), Some(next));
-    save_line(&mut current, LineConfig::default(), Some(&path)).unwrap();
-    assert_eq!(persisted_line(&std::fs::read_to_string(&path).unwrap()), Some(LineConfig::default()));
+    let fallback = LineConfig { base: "https://fallback.fixture.invalid".into(), custom: false };
+    save_line(&mut current, fallback.clone(), Some(&path)).unwrap();
+    assert_eq!(persisted_line(&std::fs::read_to_string(&path).unwrap()), Some(fallback));
     std::fs::remove_dir_all(dir).unwrap();
-}
-
-#[tokio::test]
-async fn untrusted_origins_reject_credentials_before_network() {
-    for (path, body, token) in [
-        (
-            "/api/account/loginByPassword",
-            Some(json!({"password":"secret"})),
-            None,
-        ),
-        (
-            "/api/account/registerByPassword",
-            Some(json!({"password":"secret"})),
-            None,
-        ),
-        ("/api/videos", None, Some("secret-token")),
-    ] {
-        let err = edge("https://mirror.invalid", "POST", path, body, token)
-            .await
-            .unwrap_err();
-        assert!(err.contains("镜像线路仅供游客浏览"));
-    }
 }
 
 #[tokio::test]

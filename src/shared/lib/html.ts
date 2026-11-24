@@ -4,10 +4,8 @@ import { isStrictSecurity, setStrictSecurity } from "./securityMode";
 
 export { isStrictSecurity, setStrictSecurity };
 
-/** 站点根地址：正文里的相对路径要补全 */
-const SITE = "https://huangguoai.com";
-const DEFAULT_SITE_ORIGIN = new URL(SITE).origin;
-let activeSiteOrigin = DEFAULT_SITE_ORIGIN;
+/** 当前激活视频源的协议与域名（由线路/视频源同步注入，壳本体不硬编码任何站点域名） */
+let activeSiteOrigin = "";
 
 /** 同步当前生效线路的协议与域名，用于识别正文中的同源站内视频链接 */
 export function setSiteOrigin(base: string): void {
@@ -18,7 +16,7 @@ export function setSiteOrigin(base: string): void {
       return;
     }
   } catch { /* ignore invalid base */ }
-  activeSiteOrigin = DEFAULT_SITE_ORIGIN;
+  activeSiteOrigin = "";
 }
 
 function isInternalWebviewHost(host: string): boolean {
@@ -68,7 +66,7 @@ function abs(raw: string, strict = isStrictSecurity()): string {
   const s = (raw || "").trim();
   if (!s) return "";
   try {
-    const url = new URL(s, SITE);
+    const url = activeSiteOrigin ? new URL(s, activeSiteOrigin) : new URL(s);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return "";
     if (isInternalWebviewHost(url.hostname)) return "";
     if (strict && isPrivateOrLocalHost(url.hostname)) return "";
@@ -177,12 +175,12 @@ export function parseInternalVideoId(rawUrl: string, extraOrigins: readonly stri
   if (!trimmed) return null;
   let parsed: URL;
   try {
-    parsed = new URL(trimmed, activeSiteOrigin);
+    parsed = activeSiteOrigin ? new URL(trimmed, activeSiteOrigin) : new URL(trimmed);
   } catch {
     return null;
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-  const allowedOrigins = new Set<string>([DEFAULT_SITE_ORIGIN, activeSiteOrigin]);
+  const allowedOrigins = new Set<string>(activeSiteOrigin ? [activeSiteOrigin] : []);
   for (const candidate of extraOrigins) {
     try {
       const originUrl = new URL(candidate.trim());

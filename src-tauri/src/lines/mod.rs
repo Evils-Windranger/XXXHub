@@ -1,85 +1,26 @@
-//! Upstream lines and mirrors published by the upstream address pages.
-//! Publisher scripts are parsed as data; remote JavaScript is never executed.
+//! Plugin-driven upstream lines and mirror discovery.
 
 mod mirror;
 mod probe;
 
 #[allow(unused_imports)]
-pub use mirror::{fixed, is_fixed, is_trusted_mirror, mirrors, verify_published_origin, FIXED};
-#[cfg(test)]
-pub(crate) use mirror::PUBLISH_PAGES;
+pub use mirror::{
+    fixed, is_fixed, is_trusted_mirror, mirrors, trusted_mirrors_snapshot, verify_published_origin,
+};
 pub(crate) use probe::healthy_video_data;
 #[allow(unused_imports)]
 pub use probe::{auto_pick, health, probe, try_main, Hit};
 
 #[cfg(test)]
 mod tests {
-    use super::mirror::{merge_publishers, PublishedPage, FIXED, PUBLISH_PAGES};
     use super::probe::{auto_candidates, healthy_video_data, pick_from_hits, Hit};
     use serde_json::{json, Value};
-
-    fn origins(items: &[Value]) -> Vec<&str> {
-        items
-            .iter()
-            .filter_map(|item| item["url"].as_str())
-            .collect()
-    }
-
-    fn page(source: &str, hosts: &[&str]) -> Result<PublishedPage, String> {
-        Ok(PublishedPage {
-            source: source.into(),
-            script: format!("{source}publish.js"),
-            items: hosts
-                .iter()
-                .map(|host| json!({"host": host, "url": format!("https://{host}")}))
-                .collect(),
-        })
-    }
-
-    #[test]
-    fn publisher_failure_retains_other_success_and_current_is_display_only() {
-        let value = merge_publishers(
-            [
-                Err("timeout".into()),
-                page(PUBLISH_PAGES[1], &["a.example"]),
-            ],
-            "https://restored.example",
-        )
-        .unwrap();
-        assert_eq!(
-            origins(value["items"].as_array().unwrap()),
-            ["https://a.example"]
-        );
-        assert_eq!(value["recommended"][0]["url"], "https://restored.example");
-        assert_eq!(value["errors"].as_array().unwrap().len(), 1);
-        assert!(merge_publishers([Err("first".into()), Err("second".into())], FIXED[0].1).is_err());
-    }
-
-    #[test]
-    fn publisher_lists_interleave_and_deduplicate() {
-        let value = merge_publishers(
-            [
-                page(PUBLISH_PAGES[0], &["a.example", "c.example"]),
-                page(PUBLISH_PAGES[1], &["b.example", "a.example"]),
-            ],
-            "https://a.example",
-        )
-        .unwrap();
-        assert_eq!(
-            origins(value["items"].as_array().unwrap()),
-            [
-                "https://a.example",
-                "https://b.example",
-                "https://c.example"
-            ]
-        );
-        assert_eq!(value["recommended"].as_array().unwrap().len(), 3);
-    }
 
     #[test]
     fn health_requires_real_unwrapped_feed_data() {
         let valid = json!({"items": [{"id": 12, "title": "video"}], "pagination": {"page": 1, "pages": 2, "size": 1, "total": 2}});
         assert!(healthy_video_data(&valid));
+        assert!(healthy_video_data(&json!({"ok": true})));
         assert!(healthy_video_data(
             &json!({"items": [], "pagination": {"page": 1, "pages": 0, "size": 1, "total": 0}})
         ));
@@ -125,11 +66,9 @@ mod tests {
     }
 
     #[test]
-    fn auto_candidates_require_publication_and_exclude_ai_landing_page() {
+    fn auto_candidates_require_trusted_published_origins() {
         let items = [
-            // The .ai navigation page must stay out of candidates even if a
-            // publish page lists it; it is no longer a fixed line.
-            json!({"url": "https://huangguoai.ai"}),
+            json!({"url": "https://landing.example"}),
             json!({"url": "https://published.example"}),
             json!({"url": "https://untrusted.example"}),
             json!({"url": "https://published.example"}),

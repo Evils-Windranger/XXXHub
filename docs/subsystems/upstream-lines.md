@@ -24,7 +24,7 @@ origin”，不负责 HTTP 客户端、代理、DNS 固定或媒体字节（见
 - 固定线路与发布页：[`src-tauri/src/lines/mirror.rs`](../../src-tauri/src/lines/mirror.rs) 的
   `FIXED`、`PUBLISH_PAGES`、`mirrors()`、`merge_publishers()`、`remember_published()`、
   `is_trusted_mirror()`、`is_fixed()`、`verify_published_origin()`。
-- 发布脚本与 JS-as-data 解析：[`src-tauri/src/publish_parser.rs`](../../src-tauri/src/publish_parser.rs) 的
+- 发布脚本与 JS-as-data 解析：[`src-tauri/src/source/runtime.rs`](../../src-tauri/src/source/runtime.rs)（插件 `discoverMirrors`） 的
   `MIRROR_MAX`、`parse_mirrors()`、`script_src()`、`absolute()`、`js_tokens()`、`js_string()`、`js_array()`。
 - 探测与选择：[`src-tauri/src/lines/probe.rs`](../../src-tauri/src/lines/probe.rs) 的
   `healthy_video_data()`、`probe_hit()`、`probe()`、`auto_candidates()`、`pick_from_hits()`、

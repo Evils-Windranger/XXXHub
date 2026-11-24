@@ -14,7 +14,7 @@
 
 - edge 与重试：[`src-tauri/src/net/edge.rs`](../../src-tauri/src/net/edge.rs) 的 `edge()`、
   `edge_operation()`、`edge_redirect_target()`、`with_retry()`、`retryable_error()`、
-  `fetch_bytes()`；加密网关与作用域路由在 [`src-tauri/src/edge_crypto.rs`](../../src-tauri/src/edge_crypto.rs)
+  `fetch_bytes()`；加密网关与作用域路由在 [`src-tauri/src/source/runtime.rs`](../../src-tauri/src/source/runtime.rs)（插件沙箱 `host.crypto`）
   的 `scope_for()`、`PendingHandshake`、`EdgeSession`、`call_encrypted()`。
 - 客户端与 DNS 固定：[`src-tauri/src/net/client.rs`](../../src-tauri/src/net/client.rs) 的
   `build_client()`、`ProxyRoute`、`client_key()`、`client_for_dns()`、

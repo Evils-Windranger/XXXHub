@@ -103,21 +103,11 @@ mod tests {
     use super::*;
     use crate::net::fetch_bytes;
 
-    /// 联网测试：默认跳过，手动跑 `cargo test --lib -- --ignored`。
-    /// 依赖上游 `/api/videos/117/play` 返回的实时播放地址。
+    /// 联网测试：默认跳过，需要 HGHUBX_TEST_HLS_URL 传入真实 m3u8 地址。
     #[tokio::test]
-    #[ignore = "联网测试：依赖上游实时播放地址，手动用 --ignored 运行"]
+    #[ignore = "联网测试：需要 HGHUBX_TEST_HLS_URL，手动用 --ignored 运行"]
     async fn live_play_chain() {
-        let play = crate::net::edge(
-            &crate::net::base(),
-            "GET",
-            "/api/videos/117/play?ep=3&page_texts=0",
-            None,
-            None,
-        )
-        .await
-        .expect("play api");
-        let url = play["video_url"].as_str().expect("video_url").to_string();
+        let url = crate::env::var("TEST_HLS_URL").expect("需要设置 HGHUBX_TEST_HLS_URL");
         println!("play url: {}", &url[..url.len().min(90)]);
         let (_, bytes) = fetch_bytes(&url).await.expect("fetch playlist");
         let text = String::from_utf8_lossy(&bytes);

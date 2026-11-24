@@ -75,24 +75,38 @@ pub async fn source_import(input: String, activate: Option<bool>) -> Result<Inst
     let summary = store.install(pkg, sig_info, activate.unwrap_or(false))?;
     if activate == Some(true) {
         let _ = store.activate(Some(summary.id.clone()));
+        sync_active_source_side_effects();
         return Ok(InstalledSourceSummary { active: true, ..summary });
     }
+    sync_active_source_side_effects();
     Ok(summary)
+}
+
+fn sync_active_source_side_effects() {
+    crate::media::clear_caches();
+    let origin = active_default_origin();
+    crate::net::sync_base_for_source(&origin);
 }
 
 #[tauri::command]
 pub async fn source_activate(id: Option<String>) -> Result<SourceStateSnapshot, String> {
-    store_arc().activate(id)
+    let snap = store_arc().activate(id)?;
+    sync_active_source_side_effects();
+    Ok(snap)
 }
 
 #[tauri::command]
 pub async fn source_rollback(id: String) -> Result<InstalledSourceSummary, String> {
-    store_arc().rollback(&id)
+    let res = store_arc().rollback(&id)?;
+    sync_active_source_side_effects();
+    Ok(res)
 }
 
 #[tauri::command]
 pub async fn source_remove(id: String) -> Result<SourceStateSnapshot, String> {
-    store_arc().remove(&id)
+    let snap = store_arc().remove(&id)?;
+    sync_active_source_side_effects();
+    Ok(snap)
 }
 
 #[tauri::command]
@@ -215,51 +229,43 @@ pub async fn source_test(id: String, query: Option<String>) -> Result<SourceTest
     }
 }
 
-/* ───────────────────── Active-source dispatch hooks ───────────────────── */
+/* ───────────────────── Pure-shell active-source dispatch ───────────────────── */
 
-pub(crate) async fn try_home(page: u32, size: u32) -> Option<Result<Value, String>> {
-    let store = store_arc();
-    let pkg = store.active_package()?;
-    if !pkg.manifest.capabilities.home {
-        return None;
-    }
-    Some(invoke_source(store, pkg, "home", json!({ "page": page, "size": size }), None).await)
+pub(crate) fn active_origins() -> Vec<String> {
+    store_arc()
+        .active_package()
+        .map(|p| p.manifest.network.origins)
+        .unwrap_or_default()
 }
 
-pub(crate) async fn try_search(
-    q: &str,
-    page: u32,
-    size: u32,
-    kind: Option<&str>,
-) -> Option<Result<Value, String>> {
-    let store = store_arc();
-    let pkg = store.active_package()?;
-    if !pkg.manifest.capabilities.search {
-        return None;
-    }
-    Some(
-        invoke_source(
-            store,
-            pkg,
-            "search",
-            json!({ "q": q, "page": page, "size": size, "kind": kind }),
-            None,
-        )
-        .await,
-    )
+pub(crate) fn active_default_origin() -> String {
+    active_origins().into_iter().next().unwrap_or_default()
 }
 
-pub(crate) async fn try_detail(id: i64) -> Option<Result<Value, String>> {
+pub(crate) fn active_image_decrypt() -> Option<([u8; 16], [u8; 16])> {
+    let pkg = store_arc().active_package()?;
+    let cfg = pkg.manifest.media?.image_decrypt?;
+    super::manifest::parse_image_decrypt_bytes(&cfg).ok()
+}
+
+pub(crate) async fn invoke_active(
+    method: &str,
+    input: Value,
+    auth_token: Option<String>,
+    base_override: Option<String>,
+) -> Result<Value, String> {
     let store = store_arc();
-    let pkg = store.active_package()?;
-    Some(invoke_source(store, pkg, "detail", json!({ "id": id }), None).await)
+    let pkg = store
+        .active_package()
+        .ok_or_else(|| "尚未导入视频源，请先在「视频源」中导入口令或链接".to_string())?;
+    super::runtime::invoke_source_with_ctx(store, pkg, method, input, auth_token, base_override, None).await
 }
 
 fn non_empty_str(v: Option<&Value>) -> Option<&Value> {
     v.filter(|x| !x.is_null() && x.as_str().is_some_and(|s| !s.trim().is_empty()))
 }
 
-/// Shared play-info normalizer used by both built-in `api_play` and plugin `playback`.
+/// Shared play-info normalizer used by plugin `playback`.
 pub(crate) fn normalize_play_info(info: &mut Value) {
     let Some(obj) = info.as_object_mut() else { return };
     for (field, key) in [("video_url", "main"), ("video_url_hevc", "hevc")] {
@@ -284,26 +290,4 @@ pub(crate) fn normalize_play_info(info: &mut Value) {
 
 pub(crate) fn has_play_url(info: &Value) -> bool {
     non_empty_str(info.get("video_url")).is_some() || non_empty_str(info.get("video_url_hevc")).is_some()
-}
-
-pub(crate) async fn try_play(id: i64, ep: u32) -> Option<Result<Value, String>> {
-    let store = store_arc();
-    let pkg = store.active_package()?;
-    Some(
-        invoke_source(store, pkg, "playback", json!({ "id": id, "ep": ep }), None)
-            .await
-            .map(|mut v| {
-                normalize_play_info(&mut v);
-                v
-            }),
-    )
-}
-
-pub(crate) async fn try_hot_tags() -> Option<Result<Value, String>> {
-    let store = store_arc();
-    let pkg = store.active_package()?;
-    if !pkg.manifest.capabilities.catalog.tags {
-        return None;
-    }
-    Some(invoke_source(store, pkg, "hotTags", json!({}), None).await)
 }

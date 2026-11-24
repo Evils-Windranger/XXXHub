@@ -1,17 +1,19 @@
-//! Candidate probing and automatic line selection.
+//! Candidate probing and automatic line selection via the active source plugin.
 
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use super::mirror::{is_fixed, is_trusted_mirror, mirrors, FIXED, MIRROR_MAX};
+use super::mirror::{is_fixed, is_trusted_mirror, mirrors, MIRROR_MAX};
 
-const AUTO_PROBE_PATH: &str = "/api/videos?page=1&size=1";
-const AUTO_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+const AUTO_PROBE_TIMEOUT: Duration = Duration::from_secs(6);
 const AUTO_MIRROR_MAX: usize = 10;
 
-/// Validate the unwrapped /api/videos data, rather than HTML or status alone.
+/// Validate normalized feed/probe data returned by the active source plugin.
 pub(crate) fn healthy_video_data(data: &Value) -> bool {
+    if data.get("ok").and_then(Value::as_bool) == Some(true) {
+        return true;
+    }
     let Some(items) = data.get("items").and_then(Value::as_array) else {
         return false;
     };
@@ -26,7 +28,6 @@ pub(crate) fn healthy_video_data(data: &Value) -> bool {
     {
         return false;
     }
-    // These two fields are stable feed identity, unlike optional cover/score.
     items.iter().all(|item| {
         item.get("id")
             .and_then(Value::as_u64)
@@ -76,14 +77,29 @@ async fn probe_hit(tier: &'static str, raw: &str) -> Hit {
     };
     hit.url = origin.clone();
     let started = Instant::now();
-    // edge sends the upstream's real envelope. None explicitly omits credentials.
-    // This total deadline also covers edge retries and the response body.
-    match tokio::time::timeout(
-        AUTO_PROBE_TIMEOUT,
-        crate::net::edge(&origin, "GET", AUTO_PROBE_PATH, None, None),
-    )
-    .await
-    {
+    let fut = async {
+        match crate::source::invoke_active(
+            "probeLine",
+            json!({ "baseUrl": origin }),
+            None,
+            Some(origin.clone()),
+        )
+        .await
+        {
+            Ok(v) => Ok(v),
+            Err(e) if e.contains("未实现") => {
+                crate::source::invoke_active(
+                    "home",
+                    json!({ "page": 1, "size": 1 }),
+                    None,
+                    Some(origin.clone()),
+                )
+                .await
+            }
+            Err(e) => Err(e),
+        }
+    };
+    match tokio::time::timeout(AUTO_PROBE_TIMEOUT, fut).await {
         Ok(Ok(data)) => {
             hit.reachable = true;
             hit.status = Some(200);
@@ -96,23 +112,20 @@ async fn probe_hit(tier: &'static str, raw: &str) -> Hit {
             hit.error = Some(error);
         }
         Err(_) => {
-            hit.error = Some("视频接口探测超时（5 秒）".into());
+            hit.error = Some("视频接口探测超时（6 秒）".into());
         }
     }
     hit.ms = started.elapsed().as_millis() as u64;
     hit
 }
 
-/// Manual checks retain their JSON API and never change trust or active line.
 pub async fn probe(urls: Vec<String>) -> Value {
     let mut out = Vec::new();
     for chunk in urls[..urls.len().min(MIRROR_MAX)].chunks(6) {
         let mut handles = Vec::new();
         for origin in chunk {
             let origin = origin.clone();
-            handles.push(tokio::spawn(
-                async move { probe_hit("mirror", &origin).await },
-            ));
+            handles.push(tokio::spawn(async move { probe_hit("mirror", &origin).await }));
         }
         for handle in handles {
             if let Ok(hit) = handle.await {
@@ -123,9 +136,11 @@ pub async fn probe(urls: Vec<String>) -> Value {
     json!(out)
 }
 
-/// A display recommendation is not proof of publication. Candidates are built
-/// exclusively from the published items; the .ai landing page is never automatic.
-pub(crate) fn auto_candidates(items: &[Value], current: &str, trusted: impl Fn(&str) -> bool) -> Vec<String> {
+pub(crate) fn auto_candidates(
+    items: &[Value],
+    current: &str,
+    trusted: impl Fn(&str) -> bool,
+) -> Vec<String> {
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();
     let current = crate::net::normalize_base(current);
@@ -135,8 +150,6 @@ pub(crate) fn auto_candidates(items: &[Value], current: &str, trusted: impl Fn(&
         .filter_map(crate::net::normalize_base)
         .filter(|origin| !is_fixed(origin) && trusted(origin))
         .collect();
-    // Preserve an actually published current line as a candidate, even with a
-    // large published list. A line restored only from disk never qualifies.
     if let Some(origin) = current.filter(|origin| published.contains(origin)) {
         seen.insert(origin.clone());
         candidates.push(origin);
@@ -158,16 +171,16 @@ pub(crate) fn pick_from_hits(hits: &[Hit]) -> Value {
     match winner {
         Some(hit) => json!({ "base": hit.url, "tier": hit.tier, "ms": hit.ms,
             "reason": if hit.tier == "main" { "main-ok" } else { "mirror-ok" }, "candidates": candidates }),
-        None => {
-            json!({ "base": "", "tier": "none", "ms": 0, "reason": "all-down", "candidates": candidates })
-        }
+        None => json!({ "base": "", "tier": "none", "ms": 0, "reason": "all-down", "candidates": candidates }),
     }
 }
 
-/// Prefer the real main API; otherwise probe trusted published mirrors in
-/// parallel. Publisher errors never discard another publisher's valid result.
 pub async fn auto_pick() -> Value {
-    let mut hits = vec![probe_hit("main", FIXED[0].1).await];
+    let origins = crate::source::active_origins();
+    if origins.is_empty() {
+        return json!({ "base": "", "tier": "none", "ms": 0, "reason": "no-source", "candidates": [] });
+    }
+    let mut hits = vec![probe_hit("main", &origins[0]).await];
     if hits[0].ok {
         return pick_from_hits(&hits);
     }
@@ -180,9 +193,7 @@ pub async fn auto_pick() -> Value {
             .unwrap_or(&[]);
         let mut handles = Vec::new();
         for origin in auto_candidates(items, &crate::net::base(), is_trusted_mirror) {
-            handles.push(tokio::spawn(
-                async move { probe_hit("mirror", &origin).await },
-            ));
+            handles.push(tokio::spawn(async move { probe_hit("mirror", &origin).await }));
         }
         for handle in handles {
             if let Ok(hit) = handle.await {
@@ -198,7 +209,11 @@ pub async fn auto_pick() -> Value {
 }
 
 pub async fn try_main() -> Value {
-    let hit = probe_hit("main", FIXED[0].1).await;
+    let main_origin = crate::source::active_default_origin();
+    if main_origin.is_empty() {
+        return json!({ "ok": false, "base": "", "tier": "none", "ms": 0, "status": null, "error": "尚未导入视频源" });
+    }
+    let hit = probe_hit("main", &main_origin).await;
     let mut result = hit.json();
     result["base"] = json!(hit.url);
     result
@@ -206,7 +221,11 @@ pub async fn try_main() -> Value {
 
 pub async fn health() -> Value {
     crate::net::refresh_client();
-    let hit = probe_hit("current", &crate::net::base()).await;
+    let cur = crate::net::base();
+    if cur.is_empty() {
+        return json!({ "ok": false, "base": "", "tier": "none", "ms": 0, "status": null, "error": "尚未导入视频源" });
+    }
+    let hit = probe_hit("current", &cur).await;
     let mut result = hit.json();
     result["base"] = json!(hit.url);
     result

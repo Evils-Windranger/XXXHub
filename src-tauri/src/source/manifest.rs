@@ -94,6 +94,21 @@ pub struct SourceCapabilities {
     pub lines: bool,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageDecryptConfig {
+    pub algorithm: String,
+    pub key: String,
+    pub iv: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceMediaConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_decrypt: Option<ImageDecryptConfig>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceManifest {
@@ -111,6 +126,8 @@ pub struct SourceManifest {
     pub network: SourceNetwork,
     #[serde(default)]
     pub capabilities: SourceCapabilities,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<SourceMediaConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -272,5 +289,31 @@ pub fn validate_package(pkg: &SourcePackage) -> Result<(), String> {
     validate_origin_list("network.mediaOrigins", &pkg.manifest.network.media_origins, MAX_ORIGINS)?;
     validate_origin_list("network.publishOrigins", &pkg.manifest.network.publish_origins, MAX_ORIGINS)?;
     validate_origin_list("updateUrls", &pkg.update_urls, MAX_UPDATE_URLS)?;
+    if let Some(dec) = pkg.manifest.media.as_ref().and_then(|m| m.image_decrypt.as_ref()) {
+        parse_image_decrypt_bytes(dec)?;
+    }
     Ok(())
+}
+
+pub fn decode_16_bytes(raw: &str) -> Result<[u8; 16], String> {
+    if raw.len() == 16 && raw.is_ascii() {
+        let mut out = [0u8; 16];
+        out.copy_from_slice(raw.as_bytes());
+        return Ok(out);
+    }
+    use base64::engine::general_purpose::{STANDARD as B64_STD, URL_SAFE_NO_PAD as B64_URL};
+    let bytes = B64_STD
+        .decode(raw.trim().as_bytes())
+        .or_else(|_| B64_URL.decode(raw.trim().as_bytes()))
+        .map_err(|_| "media.imageDecrypt 密钥/IV 编码无效".to_string())?;
+    bytes
+        .try_into()
+        .map_err(|_| "media.imageDecrypt 密钥与 IV 必须为 16 字节".to_string())
+}
+
+pub fn parse_image_decrypt_bytes(cfg: &ImageDecryptConfig) -> Result<([u8; 16], [u8; 16]), String> {
+    if !cfg.algorithm.eq_ignore_ascii_case("aes-128-cbc") {
+        return Err(format!("不支持的封面解密算法：{}", cfg.algorithm));
+    }
+    Ok((decode_16_bytes(&cfg.key)?, decode_16_bytes(&cfg.iv)?))
 }

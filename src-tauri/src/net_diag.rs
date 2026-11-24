@@ -376,6 +376,9 @@ pub async fn test_proxy(mode: &str, url: &str) -> Value {
         Err(error) => return json!({"ok": false, "ms": 0, "error": error}),
     };
     let origin = base();
+    if origin.is_empty() {
+        return json!({"ok": false, "ms": 0, "error": "尚未导入视频源，请先导入源后再测试代理连通性"});
+    }
     let started = Instant::now();
     let result = tokio::time::timeout(
         Duration::from_secs(8),
@@ -396,8 +399,7 @@ async fn probe_proxy_origin(
     config: &crate::proxy::Config,
     strict: bool,
 ) -> Result<Value, String> {
-    let mut next = network_policy::parse_target_with_mode(&format!("{origin}/api/public/request"), strict)?;
-    let envelope = json!({ "method": "GET", "path": "/api/videos?page=1&size=1", "body": "", "content_type": "" });
+    let mut next = network_policy::parse_target_with_mode(&format!("{origin}/"), strict)?;
     for hop in 0..=5 {
         let route = ProxyRoute::for_config(config, &next);
         let addresses = if strict && !route.active {
@@ -407,11 +409,8 @@ async fn probe_proxy_origin(
         };
         let client = build_client(next.host_str().ok_or("目标缺少主机名")?, &addresses, &route)?;
         let response = client
-            .post(next.clone())
-            .header("Accept", "application/json")
-            .header("X-HG-Public-JSON", "1")
-            .header("Referer", format!("{origin}/"))
-            .json(&envelope)
+            .get(next.clone())
+            .header("Accept", "*/*")
             .send()
             .await
             .map_err(proxy_probe_error)?;
@@ -428,22 +427,10 @@ async fn probe_proxy_origin(
             next = edge_redirect_target(&next, status, location, true)?;
             continue;
         }
-        if status != 200 {
-            return Ok(json!({"ok": false, "status": status, "via": route.label(), "error": "视频接口返回错误状态码"}));
-        }
-        let mut response = response;
-        let mut body = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(proxy_probe_error)? {
-            if body.len() + chunk.len() > 1024 * 1024 {
-                return Err("视频接口响应超过测试大小限制".into());
-            }
-            body.extend_from_slice(&chunk);
-        }
-        let ok = healthy_proxy_response(status, &body);
-        return Ok(if ok {
+        return Ok(if (200..400).contains(&status) {
             json!({"ok": true, "status": status, "via": route.label()})
         } else {
-            json!({"ok": false, "status": status, "via": route.label(), "error": "接口未返回有效视频列表数据"})
+            json!({"ok": false, "status": status, "via": route.label(), "error": "目标返回错误状态码"})
         });
     }
     Err("重定向次数超过限制".into())
@@ -605,10 +592,12 @@ mod tests {
                 }
             }
             let mut body = vec![0; length];
-            reader.read_exact(&mut body).unwrap();
-            let data = json!({"status":1,"data":{"items":[],"pagination":{"page":1,"size":1,"pages":0,"total":0}}}).to_string();
-            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{data}", data.len()).unwrap();
-            (request, serde_json::from_slice::<Value>(&body).unwrap(), auth)
+            if length > 0 {
+                reader.read_exact(&mut body).unwrap();
+            }
+            let data = "ok";
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{data}", data.len()).unwrap();
+            (request, auth)
         });
         let before = crate::proxy::snapshot();
         let config = crate::proxy::Config::for_test("custom", &format!("http://{address}")).unwrap();
@@ -617,12 +606,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["ok"], true);
-        let (request, body, auth) = serving.join().unwrap();
-        assert!(request.starts_with("POST http://unresolved.fixture.invalid/api/public/request HTTP/1.1"));
-        assert_eq!(
-            body,
-            json!({"method":"GET","path":"/api/videos?page=1&size=1","body":"","content_type":""})
-        );
+        let (request, auth) = serving.join().unwrap();
+        assert!(request.starts_with("GET http://unresolved.fixture.invalid/ HTTP/1.1"));
         assert!(!auth);
         assert!(crate::proxy::snapshot() == before);
     }
