@@ -17,5 +17,16 @@ runs:
         SDKM="$SDK/cmdline-tools/latest/bin/sdkmanager"
         yes | "$SDKM" --licenses > /dev/null 2>&1 || true
         "$SDKM" --install "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
-        echo "NDK_HOME=$SDK/ndk/28.2.13676358" >> "$GITHUB_ENV"
+        NDK="$SDK/ndk/28.2.13676358"
+        echo "NDK_HOME=$NDK" >> "$GITHUB_ENV"
+        LLVM="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
+        if [ -d "$LLVM/lib64" ] && ls "$LLVM/lib64"/libclang.so* >/dev/null 2>&1; then
+          echo "LIBCLANG_PATH=$LLVM/lib64" >> "$GITHUB_ENV"
+        elif [ -d "$LLVM/lib" ] && ls "$LLVM/lib"/libclang.so* >/dev/null 2>&1; then
+          echo "LIBCLANG_PATH=$LLVM/lib" >> "$GITHUB_ENV"
+        fi
+        SYSROOT="$LLVM/sysroot"
+        echo "BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android=--sysroot=$SYSROOT --target=aarch64-linux-android24" >> "$GITHUB_ENV"
+        echo "BINDGEN_EXTRA_CLANG_ARGS_armv7_linux_androideabi=--sysroot=$SYSROOT --target=armv7a-linux-androideabi24" >> "$GITHUB_ENV"
+        echo "BINDGEN_EXTRA_CLANG_ARGS_x86_64_linux_android=--sysroot=$SYSROOT --target=x86_64-linux-android24" >> "$GITHUB_ENV"
         ls "$SDK/ndk"
