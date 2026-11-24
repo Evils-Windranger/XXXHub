@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, APP_VERSION, hostOf, type LineState, type LineItem, type ProxyState } from "../shared/api/api";
+import { api, APP_VERSION, hostOf, type LineState, type LineItem, type ProxyState, type SourceStateSnapshot } from "../shared/api/api";
 import { autoLineEnabled, setAutoLine, pickLine } from "../shared/network/autoLine";
 import { useContentPreferences } from "../shared/model/contentPreferences";
 import { UsageAgreementText } from "../shared/ui/UsageAgreement";
@@ -18,10 +18,11 @@ import {
   summarizeReleaseNotes,
   useTvUpdater,
 } from "./updater";
-const groups=["播放偏好","画面边距","启动密码","标签屏蔽","线路","网络","缓存","关于"];
+const groups=["播放偏好","画面边距","启动密码","标签屏蔽","视频源","线路","网络","缓存","关于"];
 export default function SettingsPage(){
   const [group,setGroup]=useState(groups[0]),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[agreement,setAgreement]=useState(false),[pinModal,setPinModal]=useState<TvPinModalMode|null>(null);
   const [lines,setLines]=useState<LineState|null>(null),[proxy,setProxy]=useState<ProxyState|null>(null),[auto,setAuto]=useState(autoLineEnabled);
+  const [sources,setSources]=useState<SourceStateSnapshot|null>(null),[sourceDraft,setSourceDraft]=useState("");
   const [mirrors,setMirrors]=useState<LineItem[]>([]),[mirrorError,setMirrorError]=useState("");
   const operation = useRef(false);
   const preferences=useContentPreferences(),display=useTvDisplay(),playback=usePlaybackPreferences(),pin=useTvPin(),updater=useTvUpdater();
@@ -34,8 +35,9 @@ export default function SettingsPage(){
     return()=>{current=false;events.forEach(name=>window.removeEventListener(name,refresh));};
   },[]);
   const readMirrors=async()=>{setMirrorError("");try{const result=await api.lineMirrors();setMirrors(result.items);}catch(e){setMirrorError(String(e));}};
-  useEffect(()=>{if(group==="线路")void readMirrors();},[group]);
-  const run=async(action:()=>Promise<unknown>,success="已保存")=>{if(operation.current)return;operation.current=true;setBusy(true);setMessage("");try{await action();setMessage(success);}catch(e){setMessage(String(e));}finally{operation.current=false;setBusy(false);}};
+  const refreshSources=()=>{void api.sourceState().then(setSources).catch(()=>{});};
+  useEffect(()=>{if(group==="线路")void readMirrors();if(group==="视频源")refreshSources();},[group]);
+  const run=async(action:()=>Promise<unknown>,success="已保存")=>{if(operation.current)return;operation.current=true;setBusy(true);setMessage("");try{await action();if(success)setMessage(success);}catch(e){setMessage(String(e));}finally{operation.current=false;setBusy(false);}};
   const availableLines=[...new Map([...(lines?.fixed||[]),...mirrors].map(line=>[line.url,line])).values()];
   const hasUpdate=Boolean(updater.info?.has_update);
   const apkSize=formatApkSize(updater.info?.asset?.size);
@@ -66,6 +68,26 @@ export default function SettingsPage(){
       {group==="画面边距"&&<><p>背景和视频始终铺满屏幕。边距只作用于文字与控件。</p>{([['horizontal','左右'],['top','顶部'],['bottom','底部']] as const).map(([key,label])=><div className="tv-setting-row" data-tv-region={`margin-${key}`} key={key}><span>{label} {display[key]}%</span><button data-tv-focus={`margin-${key}-minus`} disabled={display[key]<=0} aria-label={`减少${label}边距`} onClick={()=>{if(!setTvDisplay({...display,[key]:display[key]-1}))setMessage("边距已生效，保存失败，请重试");}}>−</button><button data-tv-focus={`margin-${key}-plus`} disabled={display[key]>=12} aria-label={`增加${label}边距`} onClick={()=>{if(!setTvDisplay({...display,[key]:display[key]+1}))setMessage("边距已生效，保存失败，请重试");}}>＋</button></div>)}<button data-tv-focus="margin-reset" onClick={()=>{if(!setTvDisplay({horizontal:3,top:3,bottom:3}))setMessage("边距已生效，保存失败，请重试");}}>恢复 3% 边距</button></>}
       {group==="启动密码"&&<><p>开启后，每次打开软件都需输入 4 位数字 PIN 码后才能进入。</p><div data-tv-region="pin-options" data-tv-columns="1"><button role="switch" aria-checked={pin.enabled} data-tv-focus="pin-toggle" onClick={()=>{setMessage("");setPinModal(pin.enabled?"disable":"setup");}}>启动密码锁：{pin.enabled?"开启":"关闭"}</button>{pin.enabled&&<button data-tv-focus="pin-change" onClick={()=>{setMessage("");setPinModal("change");}}>修改 4 位密码</button>}{pin.enabled&&<button data-tv-focus="pin-lock-now" onClick={()=>lockTvSession()}>立即锁定软件</button>}</div></>}
       {group==="标签屏蔽"&&<><div data-tv-region="tag-switches" data-tv-columns="1"><button role="switch" aria-checked={preferences.preferences.paused} data-tv-focus="block-paused" onClick={()=>preferences.setPaused(!preferences.preferences.paused)}>暂停屏蔽：{preferences.preferences.paused?"开启":"关闭"}</button><button role="switch" aria-checked={preferences.preferences.hideUntagged} data-tv-focus="hide-untagged" onClick={()=>preferences.setHideUntagged(!preferences.preferences.hideUntagged)}>隐藏无标签内容：{preferences.preferences.hideUntagged?"开启":"关闭"}</button></div><p>在作品详情的“更多”中选择标签屏蔽。选择下方标签可以解除。</p><div className="tv-tags" data-tv-region="blocked-tags" data-tv-columns="3">{preferences.preferences.blockedTags.map(tag=><button key={tag} data-tv-focus={`blocked-${tag}`} onClick={()=>preferences.unblockTag(tag)}>解除：{tag}</button>)}</div></>}
+      {group==="视频源"&&<>
+        <p>当前：{sources?.activeSourceId?`${sources.sources.find(s=>s.id===sources.activeSourceId)?.name||sources.activeSourceId}（QuickJS 沙箱）`:"内置默认源"}</p>
+        <div data-tv-region="source-import" data-tv-columns="1">
+          <input data-tv-focus="source-input" value={sourceDraft} onChange={e=>setSourceDraft(e.target.value)} placeholder="粘贴 hghubx-src:// 口令、JSON 或 https:// 链接" style={{width:"100%",padding:"10px 12px",borderRadius:8,background:"rgba(255,255,255,.08)",color:"#fff",border:"1px solid rgba(255,255,255,.16)",marginBottom:10}} />
+          <div className="tv-options">
+            <button data-tv-focus="source-paste" disabled={busy} onClick={()=>{void navigator.clipboard?.readText().then(t=>{if(t)setSourceDraft(t.trim());}).catch(()=>setMessage("读取剪贴板失败，请手动输入或粘贴"));}}>从剪贴板粘贴</button>
+            <button data-tv-focus="source-import-go" disabled={busy||!sourceDraft.trim()} onClick={()=>void run(async()=>{const s=await api.sourceImport(sourceDraft.trim(),true);setSourceDraft("");setSources(await api.sourceState());window.dispatchEvent(new Event("hg:line-changed"));setMessage(`已导入并启用 ${s.name} v${s.version}`);},"")}>导入并启用</button>
+            {sources?.activeSourceId&&<button data-tv-focus="source-use-builtin" disabled={busy} onClick={()=>void run(async()=>{setSources(await api.sourceActivate(null));window.dispatchEvent(new Event("hg:line-changed"));},"已切回内置默认源")}>切回内置默认源</button>}
+          </div>
+          <button role="switch" aria-checked={!!sources?.allowUntrusted} data-tv-focus="source-allow-untrusted" disabled={busy} onClick={()=>void run(async()=>{setSources(await api.sourceSetAllowUntrusted(!sources?.allowUntrusted));},"已更新签名策略")}>允许自签/测试源：{sources?.allowUntrusted?"开启":"关闭"}</button>
+          {(sources?.sources||[]).map(src=><div key={src.id} className="tv-setting-row" style={{flexWrap:"wrap",gap:8,marginTop:8}}>
+            <span>{src.name} v{src.version}{src.active?" · 使用中":""}</span>
+            {!src.active&&<button data-tv-focus={`src-act-${src.id}`} disabled={busy} onClick={()=>void run(async()=>{setSources(await api.sourceActivate(src.id));window.dispatchEvent(new Event("hg:line-changed"));},`已启用 ${src.name}`)}>启用</button>}
+            <button data-tv-focus={`src-test-${src.id}`} disabled={busy} onClick={()=>void run(async()=>{const r=await api.sourceTest(src.id);setMessage(r.ok?`测试通过 · ${r.ms}ms · ${r.itemCount} 条`:`测试失败：${r.error||"未知错误"}`);},"")}>沙箱测试</button>
+            {src.updateUrls.length>0&&<button data-tv-focus={`src-upd-${src.id}`} disabled={busy} onClick={()=>void run(async()=>{const r=await api.sourceCheckUpdate(src.id);setSources(await api.sourceState());setMessage(r.updated?`已更新至 v${r.toVersion}`:`已是最新 v${r.fromVersion}`);},"")}>检查更新</button>}
+            {src.previousVersion&&<button data-tv-focus={`src-rb-${src.id}`} disabled={busy} onClick={()=>void run(async()=>{const r=await api.sourceRollback(src.id);setSources(await api.sourceState());window.dispatchEvent(new Event("hg:line-changed"));setMessage(`已回滚至 v${r.version}`);},"")}>回滚 v{src.previousVersion}</button>}
+            <button data-tv-focus={`src-rm-${src.id}`} disabled={busy} onClick={()=>void run(async()=>{setSources(await api.sourceRemove(src.id));window.dispatchEvent(new Event("hg:line-changed"));},"已移除视频源")}>移除</button>
+          </div>)}
+        </div>
+      </>}
       {group==="线路"&&<><p>当前：{lines?hostOf(lines.base):"正在读取"}</p><div data-tv-region="line-options" data-tv-columns="1"><button disabled={busy} role="switch" aria-checked={auto} data-tv-focus="auto-line" onClick={()=>void run(async()=>{await setAutoLine(!auto);setAuto(!auto);})}>自动选线：{auto?"开启":"关闭"}</button><button data-tv-focus="pick-line" disabled={busy||!auto} onClick={()=>void run(async()=>{await pickLine("tv-settings",true);setLines(await api.lineState());})}>重新检测可用线路</button>{mirrorError&&<p role="status">{mirrorError}</p>}<button data-tv-focus="refresh-mirrors" disabled={busy} onClick={()=>void run(readMirrors,"镜像线路已更新")}>刷新镜像线路</button>{availableLines.map(line=><button key={line.url} data-tv-focus={`line-${line.url}`} role="radio" aria-checked={lines?.base===line.url} disabled={busy} onClick={()=>void run(async()=>{await setAutoLine(false);setAuto(false);await api.lineSet(line.url);window.dispatchEvent(new Event("hg:line-changed"));setLines(await api.lineState());})}>{line.name||hostOf(line.url)}</button>)}</div></>}
       {group==="网络"&&<><p>使用电视系统代理，或直接连接。网络设置影响当前应用。</p><div data-tv-region="proxy-options" data-tv-columns="1">{(["system","off"] as const).map(mode=><button key={mode} disabled={busy} role="radio" aria-checked={proxy?.mode===mode} data-tv-focus={`proxy-${mode}`} onClick={()=>void run(async()=>{setProxy(await api.proxySet(mode,""));window.dispatchEvent(new Event("hg:proxy-changed"));})}>{mode==="system"?"跟随系统代理":"直连"}</button>)}</div></>}
       {group==="缓存"&&<><p>清理图片与媒体缓存，保留本地片库、迁移记录及偏好。搜索目录可在搜索页单独刷新。</p><button data-tv-focus="clear-cache" disabled={busy} onClick={()=>void run(async()=>{await api.clearCache();resetCachedTvUpdate();},"缓存已清理，片库和偏好已保留")}>清理缓存</button></>}
