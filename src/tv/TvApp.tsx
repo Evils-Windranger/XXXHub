@@ -60,10 +60,10 @@ export default function TvApp(){
     {!playing&&<nav className="tv-sidebar" aria-label="主导航" data-tv-region="navigation" data-tv-columns="1"><div className="tv-brand"><Logo size={32}/><span>HGhubX <small>TV</small></span></div>{nav.map(({id,label,Icon})=><button key={id} data-tv-focus={`nav-${id}`} className={id==="settings"?"tv-nav-settings":""} aria-label={id==="settings"&&hasUpdate?`${label}（有新版本）`:label} aria-current={!current&&tab===id?"page":undefined} onClick={()=>navigate(id)}><Icon size={26}/><span>{label}</span>{id==="settings"&&hasUpdate&&<em className="tv-update-dot" aria-hidden="true"/>}</button>)}</nav>}
     <main className="tv-main-area" hidden={!!current}>
       {needsSource&&tab!=="settings"?(
-        <div className="tv-page-scroll" data-tv-scroll-id="page-source-empty" style={{padding:"48px 56px",maxWidth:760}}>
-          <h1 style={{fontSize:28,marginBottom:12}}>请先导入视频源</h1>
-          <p style={{opacity:.78,lineHeight:1.6,marginBottom:24}}>HGhubX TV 本体不包含内置视频源。请前往「设置 → 视频源」粘贴 hghubx-src:// 口令、JSON 或 HTTPS 链接导入。</p>
-          <button data-tv-focus="goto-settings-source" onClick={()=>navigate("settings")}>前往设置导入视频源</button>
+        <div className="tv-page-scroll" data-tv-scroll-id="page-source-empty" style={{padding:"48px 56px",maxWidth:680}}>
+          <h1 style={{fontSize:28,marginBottom:12}}>导入视频源</h1>
+          <p style={{opacity:.78,lineHeight:1.6,marginBottom:24}}>前往「设置 → 视频源」粘贴链接导入。</p>
+          <button data-tv-focus="goto-settings-source" onClick={()=>navigate("settings")}>去设置</button>
         </div>
       ):visited.map(name=><div key={name} hidden={tab!==name} className="tv-page-scroll" data-tv-scroll-id={`page-${name}`}>
         {name==="home"&&<HomePage active={tab==="home"&&!current} onOpen={open}/>}{name==="browse"&&<BrowsePage active={tab==="browse"&&!current} onOpen={open}/>}{name==="search"&&<SearchPage key={tv.sourceKey} source={tv.source} paused={playing||tab!=="search"||!!current} onOpen={open}/>}{name==="library"&&<LibraryPage active={tab==="library"&&!current} onOpen={open}/>}{name==="settings"&&<SettingsPage/>}

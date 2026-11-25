@@ -2,7 +2,6 @@ import { useRef, useState } from "react";
 import { api, type SourceStateSnapshot } from "../../shared/api/api";
 import { useStore } from "../../shared/model/store";
 import { Button, Surface, TextArea } from "../../shared/ui/ios/controls";
-import { Toggle } from "../../shared/ui/ui";
 import { ILink, ISettings, Logo } from "../../shared/ui/icons";
 import { tr } from "../../shared/i18n";
 
@@ -92,32 +91,27 @@ export default function SourceOnboarding({
       </div>
 
       <div className="flex-1 flex items-center justify-center p-4 pb-10">
-        <div className="w-full max-w-[520px] space-y-4">
-          <div className="text-center space-y-2">
-            <div className="w-12 h-12 mx-auto rounded-(--r-md) bg-s2 flex items-center justify-center text-primary">
-              <ILink size={24} />
+        <div className="w-full max-w-[460px] space-y-4">
+          <div className="text-center space-y-1.5">
+            <div className="w-11 h-11 mx-auto rounded-(--r-md) bg-s2 flex items-center justify-center text-primary">
+              <ILink size={22} />
             </div>
-            <h1 className="text-[20px] font-bold text-on">{tr("请先导入视频源")}</h1>
-            <p className="text-[13px] text-mut leading-relaxed">
-              {tr("本客户端为纯播放器与交互壳，不内置任何视频源。请粘贴 hghubx-src:// 口令、JSON、HTTPS 链接或选择本地文件导入。")}
-            </p>
+            <h1 className="text-[20px] font-bold text-on">{tr("导入视频源")}</h1>
+            <p className="text-[13px] text-mut">{tr("粘贴链接或选择文件")}</p>
           </div>
 
           <Surface className="rounded-(--r-lg) bg-s2 p-4 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[13px] font-semibold text-on">{tr("导入视频源")}</span>
-              <div className="flex items-center gap-2">
-                <Button onClick={pasteClipboard} className="h-7 px-2.5 rounded-(--r-sm) bg-s3 text-[12px] text-on pressable">{tr("从剪贴板粘贴")}</Button>
-                <Button onClick={() => fileRef.current?.click()} className="h-7 px-2.5 rounded-(--r-sm) bg-s3 text-[12px] text-on pressable">{tr("选择本地文件")}</Button>
-                <input ref={fileRef} type="file" accept=".json,.hgsrc,.txt" className="hidden" onChange={(e) => void onFilePick(e.target.files?.[0])} />
-              </div>
+            <div className="flex items-center justify-end gap-2">
+              <Button onClick={pasteClipboard} className="h-7 px-2.5 rounded-(--r-sm) bg-s3 text-[12px] text-on pressable">{tr("粘贴")}</Button>
+              <Button onClick={() => fileRef.current?.click()} className="h-7 px-2.5 rounded-(--r-sm) bg-s3 text-[12px] text-on pressable">{tr("文件")}</Button>
+              <input ref={fileRef} type="file" accept=".json,.hgsrc,.txt" className="hidden" onChange={(e) => void onFilePick(e.target.files?.[0])} />
             </div>
             <TextArea
               aria-label={tr("导入视频源")}
-              placeholder={tr("粘贴 hghubx-src:// 口令、JSON 或 https:// 链接")}
+              placeholder={tr("粘贴链接或 JSON")}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              className="w-full h-28 p-3 rounded-(--r-sm) bg-s3 text-[12px] text-on font-mono resize-none"
+              className="w-full h-24 p-3 rounded-(--r-sm) bg-s3 text-[12px] text-on font-mono resize-none"
             />
             {error && <p role="alert" className="text-[12px] text-danger break-words">{error}</p>}
             <Button
@@ -125,33 +119,17 @@ export default function SourceOnboarding({
               onClick={() => void doImport()}
               className="w-full h-10 rounded-(--r-ctl) brand-grad text-[14px] font-semibold text-on-primary pressable disabled:opacity-50"
             >
-              {busy ? tr("导入中…") : tr("导入并启用")}
+              {busy ? tr("导入中…") : tr("导入")}
             </Button>
-          </Surface>
-
-          <Surface className="rounded-(--r-md) bg-s2 px-4 py-3 flex items-center gap-3">
-            <div className="flex-1 min-w-0">
-              <div className="text-[13px] text-on">{tr("允许自签/测试源")}</div>
-              <div className="text-[11px] text-mut mt-0.5">{tr("默认仅允许受信任 Ed25519 签名源；开启后可导入自签或未签名的本地开发源")}</div>
-            </div>
-            <Toggle
-              desktop
-              label={tr("允许自签/测试源")}
-              on={state.allowUntrusted}
-              onChange={(on) => {
-                void api.sourceSetAllowUntrusted(on).then(onChanged).catch((e) => setError(e instanceof Error ? e.message : String(e)));
-              }}
-            />
           </Surface>
 
           {state.sources.length > 0 && (
             <Surface className="rounded-(--r-md) bg-s2 p-3.5 space-y-2">
-              <div className="text-[12px] font-semibold text-dim">{tr("已安装的视频源")}</div>
+              <div className="text-[12px] font-semibold text-dim">{tr("已安装")}</div>
               {state.sources.map((src) => (
-                <div key={src.id} className="flex items-center gap-2 py-1.5">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-medium text-on truncate">{src.name} <span className="text-[11px] text-mut font-mono">v{src.version}</span></div>
-                    <div className="text-[11px] text-dim truncate">{src.id}</div>
+                <div key={src.id} className="flex items-center gap-2 py-1">
+                  <div className="flex-1 min-w-0 text-[13px] font-medium text-on truncate">
+                    {src.name} <span className="text-[11px] text-mut font-mono">v{src.version}</span>
                   </div>
                   <Button disabled={busy} onClick={() => void activateExisting(src.id, src.name)} className="h-8 px-3 rounded-(--r-sm) bg-primary text-[12px] font-medium text-on-primary pressable">
                     {tr("启用")}

@@ -73,7 +73,7 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
   const readSource = () => {
     api.sourceState().then((s) => {
       const active = s.sources.find((x) => x.active);
-      setSourceHint(active ? tr("已启用：{0}（v{1}）", active.name, active.version) : s.sources.length ? tr("已安装 {0} 个 · 未启用", s.sources.length) : tr("未导入视频源"));
+      setSourceHint(active ? `${active.name} v${active.version}` : tr("未设置"));
     }).catch(() => setSourceHint(""));
   };
   useEffect(() => {
@@ -263,8 +263,8 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
             <Button onClick={() => setSourceOpen(true)} className="ios-settings-row text-left pressable">
               <span className="ios-setting-icon"><ILink size={16} /></span>
               <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">{tr("视频源插件")}</div>
-                <div className="text-[12px] text-mut truncate">{sourceHint || tr("支持口令、JSON 或 HTTPS 链接导入")}</div>
+                <div className="text-[14px] text-on">{tr("视频源")}</div>
+                <div className="text-[12px] text-mut truncate">{sourceHint || tr("未设置")}</div>
               </div>
               <IChevR size={15} className="text-mut" />
             </Button>
