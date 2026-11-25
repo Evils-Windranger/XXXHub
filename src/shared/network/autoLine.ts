@@ -217,6 +217,14 @@ function attach() {
     lastPickAt = null;
     schedule(RECHECK_MS);
   });
+  window.addEventListener("hg:source-changed", () => {
+    if (!autoLineEnabled()) return;
+    failStreak = 0;
+    downStreak = 0;
+    step = 0;
+    lastPickAt = null;
+    void pickLine("source-changed", true);
+  });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") stopTimer();
     else if (pendingOnlinePick) {

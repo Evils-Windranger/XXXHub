@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use super::mirror::{is_fixed, is_trusted_mirror, mirrors, MIRROR_MAX};
 
 const AUTO_PROBE_TIMEOUT: Duration = Duration::from_secs(6);
+const MAIN_AUTO_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const AUTO_MIRROR_MAX: usize = 10;
 
 /// Validate normalized feed/probe data returned by the active source plugin.
@@ -62,6 +63,10 @@ impl Hit {
 }
 
 async fn probe_hit(tier: &'static str, raw: &str) -> Hit {
+    probe_hit_with_timeout(tier, raw, AUTO_PROBE_TIMEOUT).await
+}
+
+async fn probe_hit_with_timeout(tier: &'static str, raw: &str, timeout: Duration) -> Hit {
     let mut hit = Hit {
         tier,
         url: raw.to_owned(),
@@ -99,7 +104,7 @@ async fn probe_hit(tier: &'static str, raw: &str) -> Hit {
             Err(e) => Err(e),
         }
     };
-    match tokio::time::timeout(AUTO_PROBE_TIMEOUT, fut).await {
+    match tokio::time::timeout(timeout, fut).await {
         Ok(Ok(data)) => {
             hit.reachable = true;
             hit.status = Some(200);
@@ -112,7 +117,7 @@ async fn probe_hit(tier: &'static str, raw: &str) -> Hit {
             hit.error = Some(error);
         }
         Err(_) => {
-            hit.error = Some("视频接口探测超时（6 秒）".into());
+            hit.error = Some(format!("视频接口探测超时（{} 秒）", timeout.as_secs()));
         }
     }
     hit.ms = started.elapsed().as_millis() as u64;
@@ -180,11 +185,16 @@ pub async fn auto_pick() -> Value {
     if origins.is_empty() {
         return json!({ "base": "", "tier": "none", "ms": 0, "reason": "no-source", "candidates": [] });
     }
-    let mut hits = vec![probe_hit("main", &origins[0]).await];
+    let mirrors_task = tokio::spawn(mirrors());
+    let mut hits = vec![probe_hit_with_timeout("main", &origins[0], MAIN_AUTO_PROBE_TIMEOUT).await];
     if hits[0].ok {
+        mirrors_task.abort();
         return pick_from_hits(&hits);
     }
-    let listing = mirrors().await;
+    let listing = match mirrors_task.await {
+        Ok(res) => res,
+        Err(_) => Err("镜像线路任务异常终止".into()),
+    };
     if let Ok(listing) = &listing {
         let items = listing
             .get("items")
