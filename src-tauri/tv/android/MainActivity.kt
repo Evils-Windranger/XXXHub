@@ -16,9 +16,36 @@ import androidx.core.view.WindowInsetsCompat
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import org.json.JSONObject
 
 class MainActivity : TauriActivity() {
   @Volatile private var pendingUpdateInstall = false
+  @Volatile private var pendingDeepLink: String? = null
+  private var mainWebView: WebView? = null
+
+  private fun captureDeepLink(intent: Intent?) {
+    val raw = intent?.dataString ?: return
+    if (raw.startsWith("hghubx://", ignoreCase = true)) {
+      pendingDeepLink = raw
+      deliverDeepLink()
+    }
+  }
+
+  private fun deliverDeepLink() {
+    val link = pendingDeepLink ?: return
+    val wv = mainWebView ?: return
+    val quoted = JSONObject.quote(link)
+    val js = "(function(){window.__HG_DEEP_LINK__=" + quoted +
+      ";window.dispatchEvent(new CustomEvent('hg:deep-link',{detail:" + quoted + "}));})();"
+    wv.post { wv.evaluateJavascript(js, null) }
+    for (delay in longArrayOf(400L, 1400L)) {
+      wv.postDelayed({
+        val cur = pendingDeepLink ?: return@postDelayed
+        val q = JSONObject.quote(cur)
+        wv.evaluateJavascript("(function(){if(window.__HG_DEEP_LINK_HANDLED__===" + q + ")return;window.__HG_DEEP_LINK__=" + q + ";window.dispatchEvent(new CustomEvent('hg:deep-link',{detail:" + q + "}));})();", null)
+      }, delay)
+    }
+  }
 
   private fun cachedUpdateFile(): File = File(cacheDir, "updates/hghubx-tv-update.apk")
 
@@ -90,7 +117,15 @@ class MainActivity : TauriActivity() {
 
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
+    mainWebView = webView
     webView.addJavascriptInterface(TvApkInstaller(), "HGhubXTvInstaller")
+    deliverDeepLink()
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    captureDeepLink(intent)
   }
 
   override fun onResume() {
@@ -110,6 +145,7 @@ class MainActivity : TauriActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    captureDeepLink(intent)
 
     // Android 15/16 can enforce edge-to-edge. Give the native content container
     // sole ownership of reported system-bar, cutout and keyboard insets instead

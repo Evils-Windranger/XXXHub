@@ -1,6 +1,7 @@
 //! Sandboxed video-source plugin runtime, Ed25519 verification, share-code codec, and atomic store.
 
 pub(crate) mod commands;
+pub(crate) mod lan_push;
 pub(crate) mod manifest;
 pub(crate) mod runtime;
 pub(crate) mod store;

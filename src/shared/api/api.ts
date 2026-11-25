@@ -222,6 +222,10 @@ export const api = {
   sourceCheckUpdate: (id: string) => call<SourceUpdateOutcome>("source_check_update", { id }),
   sourceTest: (id: string, query?: string) =>
     call<SourceTestOutcome>("source_test", { id, query: query ?? null }),
+  sourceTakeDeepLink: () => call<string | null>("source_take_deep_link"),
+  sourceLanPushStart: () => call<LanPushSession>("source_lan_push_start"),
+  sourceLanPushStop: () => call<void>("source_lan_push_stop"),
+  sourceLanPushStatus: () => call<LanPushStatus>("source_lan_push_status"),
 
   /* 更新检查：对比 GitHub Release 的 tag */
   checkUpdate: (opts?: { edition?: "tv"; currentVersion?: string }) =>
@@ -352,6 +356,19 @@ export type SourceTestOutcome = {
   itemCount: number;
   sampleTitle?: string | null;
   error?: string | null;
+};
+
+export type LanPushSession = {
+  url: string;
+  ip: string;
+  port: number;
+  token: string;
+};
+
+export type LanPushStatus = {
+  active: boolean;
+  url?: string | null;
+  lastImported?: InstalledSourceSummary | null;
 };
 
 /** `https://a.b/c` → `a.b`（线路展示用） */

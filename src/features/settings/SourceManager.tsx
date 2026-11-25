@@ -173,7 +173,7 @@ export default function SourceManager({ open, onClose }: { open: boolean; onClos
           </div>
           <TextArea
             aria-label={tr("导入视频源")}
-            placeholder={tr("粘贴链接或 JSON")}
+            placeholder={tr("链接 / npm:包名 / JSON")}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             className="w-full h-20 p-2.5 rounded-(--r-sm) bg-s3 text-[12px] text-on font-mono resize-none"

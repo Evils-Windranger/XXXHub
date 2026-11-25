@@ -97,7 +97,6 @@ export default function SourceOnboarding({
               <ILink size={22} />
             </div>
             <h1 className="text-[20px] font-bold text-on">{tr("导入视频源")}</h1>
-            <p className="text-[13px] text-mut">{tr("粘贴链接或选择文件")}</p>
           </div>
 
           <Surface className="rounded-(--r-lg) bg-s2 p-4 space-y-3">
@@ -108,7 +107,7 @@ export default function SourceOnboarding({
             </div>
             <TextArea
               aria-label={tr("导入视频源")}
-              placeholder={tr("粘贴链接或 JSON")}
+              placeholder={tr("链接 / npm:包名 / JSON")}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               className="w-full h-24 p-3 rounded-(--r-sm) bg-s3 text-[12px] text-on font-mono resize-none"

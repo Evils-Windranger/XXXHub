@@ -7,6 +7,7 @@ import { setTvDisplay, useTvDisplay } from "./display";
 import { lockTvSession, useTvPin } from "./pinLock";
 import { setPlaybackPreferences, usePlaybackPreferences } from "./preferences";
 import { TvPinSettingsModal, type TvPinModalMode } from "./TvPinGate";
+import TvLanPushPanel from "./TvLanPushPanel";
 import { TvModal } from "./ui";
 import {
   cancelTvUpdateDownload,
@@ -22,7 +23,7 @@ const groups=["播放偏好","画面边距","启动密码","标签屏蔽","视�
 export default function SettingsPage(){
   const [group,setGroup]=useState(groups[0]),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[agreement,setAgreement]=useState(false),[pinModal,setPinModal]=useState<TvPinModalMode|null>(null);
   const [lines,setLines]=useState<LineState|null>(null),[proxy,setProxy]=useState<ProxyState|null>(null),[auto,setAuto]=useState(autoLineEnabled);
-  const [sources,setSources]=useState<SourceStateSnapshot|null>(null),[sourceDraft,setSourceDraft]=useState("");
+  const [sources,setSources]=useState<SourceStateSnapshot|null>(null);
   const [mirrors,setMirrors]=useState<LineItem[]>([]),[mirrorError,setMirrorError]=useState("");
   const operation = useRef(false);
   const preferences=useContentPreferences(),display=useTvDisplay(),playback=usePlaybackPreferences(),pin=useTvPin(),updater=useTvUpdater();
@@ -70,12 +71,11 @@ export default function SettingsPage(){
       {group==="标签屏蔽"&&<><div data-tv-region="tag-switches" data-tv-columns="1"><button role="switch" aria-checked={preferences.preferences.paused} data-tv-focus="block-paused" onClick={()=>preferences.setPaused(!preferences.preferences.paused)}>暂停屏蔽：{preferences.preferences.paused?"开启":"关闭"}</button><button role="switch" aria-checked={preferences.preferences.hideUntagged} data-tv-focus="hide-untagged" onClick={()=>preferences.setHideUntagged(!preferences.preferences.hideUntagged)}>隐藏无标签内容：{preferences.preferences.hideUntagged?"开启":"关闭"}</button></div><p>在作品详情的“更多”中选择标签屏蔽。选择下方标签可以解除。</p><div className="tv-tags" data-tv-region="blocked-tags" data-tv-columns="3">{preferences.preferences.blockedTags.map(tag=><button key={tag} data-tv-focus={`blocked-${tag}`} onClick={()=>preferences.unblockTag(tag)}>解除：{tag}</button>)}</div></>}
       {group==="视频源"&&<>
         <p>当前：{sources?.activeSourceId?(sources.sources.find(s=>s.id===sources.activeSourceId)?.name||sources.activeSourceId):"未设置"}</p>
-        <div data-tv-region="source-import" data-tv-columns="1">
-          <input data-tv-focus="source-input" value={sourceDraft} onChange={e=>setSourceDraft(e.target.value)} placeholder="粘贴链接或 JSON" style={{width:"100%",padding:"10px 12px",borderRadius:8,background:"rgba(255,255,255,.08)",color:"#fff",border:"1px solid rgba(255,255,255,.16)",marginBottom:10}} />
-          <div className="tv-options">
-            <button data-tv-focus="source-paste" disabled={busy} onClick={()=>{void navigator.clipboard?.readText().then(t=>{if(t)setSourceDraft(t.trim());}).catch(()=>setMessage("读取剪贴板失败，请手动输入或粘贴"));}}>粘贴</button>
-            <button data-tv-focus="source-import-go" disabled={busy||!sourceDraft.trim()} onClick={()=>void run(async()=>{const s=await api.sourceImport(sourceDraft.trim(),true);setSourceDraft("");setSources(await api.sourceState());window.dispatchEvent(new Event("hg:line-changed"));setMessage(`已导入 ${s.name} v${s.version}`);},"")}>导入</button>
-          </div>
+        <TvLanPushPanel
+          onImported={()=>{refreshSources();}}
+          onMessage={setMessage}
+        />
+        <div data-tv-region="source-list" data-tv-columns="1" style={{marginTop:14}}>
           {(sources?.sources||[]).map(src=><div key={src.id} className="tv-setting-row" style={{flexWrap:"wrap",gap:8,marginTop:8}}>
             <span>{src.name} v{src.version}{src.active?" · 使用中":""}</span>
             {src.active

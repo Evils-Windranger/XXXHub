@@ -7,10 +7,28 @@ use super::runtime::{host_http_request, invoke_source};
 use super::store::{InstalledSourceSummary, SourceStateSnapshot};
 use super::verify::verify_package;
 use super::store_arc;
+use once_cell::sync::Lazy;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::Instant;
+
+static PENDING_DEEP_LINK: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+
+pub(crate) fn set_pending_deep_link(url: String) {
+    if let Ok(mut guard) = PENDING_DEEP_LINK.lock() {
+        *guard = Some(url);
+    }
+}
+
+#[tauri::command]
+pub fn source_take_deep_link() -> Option<String> {
+    PENDING_DEEP_LINK
+        .lock()
+        .ok()
+        .and_then(|mut guard| guard.take())
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,30 +50,176 @@ pub struct SourceTestOutcome {
     pub error: Option<String>,
 }
 
+fn parse_deep_link_target(raw: &str) -> Option<String> {
+    let parsed = url::Url::parse(raw).ok()?;
+    if !parsed.scheme().eq_ignore_ascii_case("hghubx") {
+        return None;
+    }
+    let host = parsed.host_str().unwrap_or("");
+    let path = parsed.path().trim_matches('/');
+    if !host.eq_ignore_ascii_case("import") && !path.eq_ignore_ascii_case("import") {
+        return None;
+    }
+    for (k, v) in parsed.query_pairs() {
+        if matches!(k.as_ref(), "url" | "src" | "code") && !v.trim().is_empty() {
+            return Some(v.trim().to_string());
+        }
+    }
+    None
+}
+
+fn expand_npm_shorthand(spec: &str) -> Option<Vec<String>> {
+    let s = spec.trim().trim_start_matches('/');
+    if s.is_empty() || s.chars().any(char::is_whitespace) {
+        return None;
+    }
+    let (pkg_ver, file) = if s.starts_with('@') {
+        let slash1 = s.find('/')?;
+        let rest = &s[slash1 + 1..];
+        match rest.find('/') {
+            Some(slash2) => (&s[..slash1 + 1 + slash2], &rest[slash2 + 1..]),
+            None => (s, "hg.json"),
+        }
+    } else {
+        match s.find('/') {
+            Some(slash) => (&s[..slash], &s[slash + 1..]),
+            None => (s, "hg.json"),
+        }
+    };
+    if pkg_ver.is_empty() {
+        return None;
+    }
+    let file = if file.trim().is_empty() { "hg.json" } else { file.trim_start_matches('/') };
+    let has_ver = if pkg_ver.starts_with('@') {
+        pkg_ver[1..].contains('@')
+    } else {
+        pkg_ver.contains('@')
+    };
+    let full_pkg = if has_ver {
+        pkg_ver.to_string()
+    } else {
+        format!("{pkg_ver}@latest")
+    };
+    Some(vec![
+        format!("https://cdn.jsdelivr.net/npm/{full_pkg}/{file}"),
+        format!("https://fastly.jsdelivr.net/npm/{full_pkg}/{file}"),
+    ])
+}
+
+fn expand_gh_shorthand(spec: &str) -> Option<Vec<String>> {
+    let s = spec.trim().trim_start_matches('/');
+    if s.is_empty() || s.chars().any(char::is_whitespace) {
+        return None;
+    }
+    let mut parts = s.splitn(3, '/');
+    let owner = parts.next()?.trim();
+    let repo_ref = parts.next()?.trim();
+    let file = parts.next().map(str::trim).filter(|f| !f.is_empty()).unwrap_or("hg.json");
+    if owner.is_empty() || repo_ref.is_empty() {
+        return None;
+    }
+    let repo_with_ref = if repo_ref.contains('@') {
+        repo_ref.to_string()
+    } else {
+        format!("{repo_ref}@main")
+    };
+    Some(vec![
+        format!("https://cdn.jsdelivr.net/gh/{owner}/{repo_with_ref}/{file}"),
+        format!("https://fastly.jsdelivr.net/gh/{owner}/{repo_with_ref}/{file}"),
+    ])
+}
+
+fn expand_import_urls(trimmed: &str) -> Option<Vec<String>> {
+    if let Some(inner) = parse_deep_link_target(trimmed) {
+        return expand_import_urls(&inner);
+    }
+    if let Some(rest) = trimmed.strip_prefix("npm:") {
+        return expand_npm_shorthand(rest);
+    }
+    if let Some(rest) = trimmed.strip_prefix("gh:") {
+        return expand_gh_shorthand(rest);
+    }
+    if trimmed.starts_with("https://") || trimmed.starts_with("http://") {
+        return Some(vec![trimmed.to_string()]);
+    }
+    // Bare host/path shorthand (e.g. `example.com/hg.json`)
+    if !trimmed.starts_with('{')
+        && !trimmed.starts_with("hghubx-src://")
+        && !trimmed.chars().any(char::is_whitespace)
+    {
+        if let Some((host, path)) = trimmed.split_once('/') {
+            if host.contains('.') && !host.contains(':') && !path.is_empty() {
+                return Some(vec![format!("https://{trimmed}")]);
+            }
+        }
+    }
+    None
+}
+
 async fn resolve_raw_input(input: &str) -> Result<String, String> {
     let trimmed = input.trim();
-    if trimmed.starts_with("https://") || trimmed.starts_with("http://") {
-        let resp = host_http_request(
-            "GET",
-            trimmed,
-            &HashMap::new(),
-            None,
-            None,
-            MAX_PACKAGE_JSON_BYTES,
-            15,
-        )
-        .await?;
-        let status = resp.get("status").and_then(Value::as_u64).unwrap_or(0);
-        if !(200..300).contains(&status) {
-            return Err(format!("拉取远程视频源失败（HTTP {status}）"));
+    if let Some(inner) = parse_deep_link_target(trimmed) {
+        if !inner.starts_with("http://")
+            && !inner.starts_with("https://")
+            && !inner.starts_with("npm:")
+            && !inner.starts_with("gh:")
+            && expand_import_urls(&inner).is_none()
+        {
+            return Ok(inner);
         }
-        return Ok(resp
-            .get("text")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string());
+    }
+    if let Some(urls) = expand_import_urls(trimmed) {
+        let mut last_err = String::from("拉取远程视频源失败");
+        for url in urls {
+            match host_http_request(
+                "GET",
+                &url,
+                &HashMap::new(),
+                None,
+                None,
+                MAX_PACKAGE_JSON_BYTES,
+                15,
+            )
+            .await
+            {
+                Ok(resp) => {
+                    let status = resp.get("status").and_then(Value::as_u64).unwrap_or(0);
+                    if (200..300).contains(&status) {
+                        return Ok(resp
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string());
+                    }
+                    last_err = format!("拉取远程视频源失败（HTTP {status}）");
+                }
+                Err(e) => last_err = e,
+            }
+        }
+        return Err(last_err);
     }
     Ok(trimmed.to_string())
+}
+
+pub(crate) async fn import_source_raw(
+    input: &str,
+    activate: bool,
+) -> Result<InstalledSourceSummary, String> {
+    let raw = resolve_raw_input(input).await?;
+    let pkg = decode_package_input(&raw)?;
+    validate_package(&pkg)?;
+    let store = store_arc();
+    let sig_info = verify_package(&pkg, store.allow_untrusted())?;
+    // Smoke-test loading & optional init() inside QuickJS before installing!
+    invoke_source(store.clone(), pkg.clone(), "init", json!({}), Some(6)).await?;
+    let summary = store.install(pkg, sig_info, activate)?;
+    if activate {
+        let _ = store.activate(Some(summary.id.clone()));
+        sync_active_source_side_effects();
+        return Ok(InstalledSourceSummary { active: true, ..summary });
+    }
+    sync_active_source_side_effects();
+    Ok(summary)
 }
 
 #[tauri::command]
@@ -65,21 +229,7 @@ pub async fn source_state() -> Result<SourceStateSnapshot, String> {
 
 #[tauri::command]
 pub async fn source_import(input: String, activate: Option<bool>) -> Result<InstalledSourceSummary, String> {
-    let raw = resolve_raw_input(&input).await?;
-    let pkg = decode_package_input(&raw)?;
-    validate_package(&pkg)?;
-    let store = store_arc();
-    let sig_info = verify_package(&pkg, store.allow_untrusted())?;
-    // Smoke-test loading & optional init() inside QuickJS before installing!
-    invoke_source(store.clone(), pkg.clone(), "init", json!({}), Some(6)).await?;
-    let summary = store.install(pkg, sig_info, activate.unwrap_or(false))?;
-    if activate == Some(true) {
-        let _ = store.activate(Some(summary.id.clone()));
-        sync_active_source_side_effects();
-        return Ok(InstalledSourceSummary { active: true, ..summary });
-    }
-    sync_active_source_side_effects();
-    Ok(summary)
+    import_source_raw(&input, activate.unwrap_or(false)).await
 }
 
 fn sync_active_source_side_effects() {

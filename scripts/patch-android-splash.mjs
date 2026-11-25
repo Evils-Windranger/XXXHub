@@ -127,8 +127,28 @@ for (const directory of directories) {
 for (const [path, xml] of pending) writeFileSync(path, xml);
 console.log(`[splash] Android ${themeCount} 个主题背景已对齐 → ${BRAND}（更新 ${pending.size} 个文件）`);
 
+// Also register hghubx://import deep-link intent-filter in AndroidManifest.xml (idempotent).
+const manifestPath = join(root, "src-tauri", "gen", "android", "app", "src", "main", "AndroidManifest.xml");
+if (existsSync(manifestPath)) {
+  const manifestRaw = readFileSync(manifestPath, "utf8");
+  if (!/android:scheme\s*=\s*["']hghubx["']/.test(manifestRaw)) {
+    const deepLinkFilter = `
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="hghubx" android:host="import" />
+            </intent-filter>`;
+    const updatedManifest = manifestRaw.replace(/(<\/activity\s*>)/, `${deepLinkFilter}\n        $1`);
+    if (updatedManifest !== manifestRaw) {
+      writeFileSync(manifestPath, updatedManifest);
+      console.log("[splash] Android 已注册 hghubx://import 深链");
+    }
+  }
+}
+
 // Standard edition (com.hghubx.app): keep edge-to-edge video while exposing
-// native system-bar, cutout and keyboard insets as CSS variables.
+// native system-bar, cutout and keyboard insets as CSS variables, plus hghubx:// deep links.
 // Old WebViews (e.g. Chromium 66 car headunits) lack CSS env(safe-area-inset-*)
 // and report zero cutout despite persistent status/dock bars (#138).
 const appActivityPath = join(root, "src-tauri", "gen", "android", "app", "src", "main", "java", "com", "hghubx", "app", "MainActivity.kt");
@@ -144,6 +164,7 @@ class MainActivity : TauriActivity() {
 }`;
   const patchedActivity = `package com.hghubx.app
 
+import android.content.Intent
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
@@ -154,12 +175,14 @@ import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import org.json.JSONObject
 import kotlin.math.roundToInt
 
 class MainActivity : TauriActivity() {
   private var barsStyle = ""
   private var imeBottom = 0
   private var webViewHooked = false
+  @Volatile private var pendingDeepLink: String? = null
 
   private fun findWebView(view: View?): WebView? {
     if (view is WebView) return view
@@ -169,6 +192,30 @@ class MainActivity : TauriActivity() {
       }
     }
     return null
+  }
+
+  private fun captureDeepLink(intent: Intent?) {
+    val raw = intent?.dataString ?: return
+    if (raw.startsWith("hghubx://", ignoreCase = true)) {
+      pendingDeepLink = raw
+      findViewById<View>(android.R.id.content)?.let { deliverDeepLink(it) }
+    }
+  }
+
+  private fun deliverDeepLink(content: View) {
+    val link = pendingDeepLink ?: return
+    val wv = findWebView(content) ?: return
+    val quoted = JSONObject.quote(link)
+    val js = "(function(){window.__HG_DEEP_LINK__=" + quoted +
+      ";window.dispatchEvent(new CustomEvent('hg:deep-link',{detail:" + quoted + "}));})();"
+    wv.evaluateJavascript(js, null)
+    for (delay in longArrayOf(350L, 1200L)) {
+      wv.postDelayed({
+        val cur = pendingDeepLink ?: return@postDelayed
+        val q = JSONObject.quote(cur)
+        wv.evaluateJavascript("(function(){if(window.__HG_DEEP_LINK_HANDLED__===" + q + ")return;window.__HG_DEEP_LINK__=" + q + ";window.dispatchEvent(new CustomEvent('hg:deep-link',{detail:" + q + "}));})();", null)
+      }, delay)
+    }
   }
 
   private fun keyboardOverlap(webView: WebView): Int {
@@ -194,6 +241,7 @@ class MainActivity : TauriActivity() {
     val script = "(function(){var s=document.documentElement&&document.documentElement.style;if(!s)return;" +
       barsStyle + keyboardStyle + "})();"
     wv.evaluateJavascript(script, null)
+    deliverDeepLink(content)
     if (!webViewHooked) {
       webViewHooked = true
       for (delay in longArrayOf(150L, 600L, 1500L)) {
@@ -202,9 +250,16 @@ class MainActivity : TauriActivity() {
     }
   }
 
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    captureDeepLink(intent)
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    captureDeepLink(intent)
     window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
     val content = findViewById<View>(android.R.id.content) ?: return
     ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
@@ -235,14 +290,16 @@ class MainActivity : TauriActivity() {
   const normalize = (text) => text.trim().replace(/\s+/g, " ");
   const currentActivity = readFileSync(appActivityPath, "utf8");
   const normalized = normalize(currentActivity);
-  // Also accept projects already generated with the previous bars-only bridge.
-  const previousPatchedHash = "52a0435284e8cd76196b4e73ab2f8394f041675f7736af31e6c083aae4e72c31";
+  // Also accept projects already generated with previous versions of this bridge.
+  const previousPatchedHashes = new Set([
+    "52a0435284e8cd76196b4e73ab2f8394f041675f7736af31e6c083aae4e72c31",
+  ]);
   if (![templateActivity, patchedActivity].some((expected) => normalize(expected) === normalized) &&
-      createHash("sha256").update(normalized).digest("hex") !== previousPatchedHash) {
+      !previousPatchedHashes.has(createHash("sha256").update(normalized).digest("hex"))) {
     fail(appActivityPath, "MainActivity 与已知 Tauri 模板不同，请审阅原生改动后更新补丁");
   }
   if (normalized !== normalize(patchedActivity)) {
     writeFileSync(appActivityPath, patchedActivity);
   }
-  console.log("[splash] Android 标准版系统栏与软键盘安全区桥接已写入 MainActivity.kt");
+  console.log("[splash] Android 标准版系统栏、软键盘安全区与深链桥接已写入 MainActivity.kt");
 }

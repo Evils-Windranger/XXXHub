@@ -105,6 +105,9 @@ pub fn run() {
             let _ = (webview, payload);
         })
         .setup(|app| {
+            if let Some(link) = std::env::args().skip(1).find(|a| a.starts_with("hghubx://")) {
+                source::commands::set_pending_deep_link(link);
+            }
             if let Ok(dir) = app.path().app_data_dir() {
                 let _ = std::fs::create_dir_all(&dir);
                 // 上次选择的线路（设置 → 线路）在启动时恢复
@@ -290,6 +293,10 @@ pub fn run() {
             source::commands::source_export_share_code,
             source::commands::source_check_update,
             source::commands::source_test,
+            source::commands::source_take_deep_link,
+            source::lan_push::source_lan_push_start,
+            source::lan_push::source_lan_push_stop,
+            source::lan_push::source_lan_push_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
