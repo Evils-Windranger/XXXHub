@@ -1,15 +1,36 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { addPluginListener, invoke } from "@tauri-apps/api/core";
 import App from "./App";
 import SourceOnboarding from "./startup/SourceOnboarding";
-import { api, type SourceStateSnapshot } from "../shared/api/api";
+import { api, isMobile, platform, type SourceStateSnapshot } from "../shared/api/api";
+import { runBack } from "../shared/lib/back";
 import { usePendingDeepLink } from "../shared/lib/deepLink";
 import { AppProvider, useStore } from "../shared/model/store";
 import { initAutoLine } from "../shared/network/autoLine";
-import { tr } from "../shared/i18n";
+import { tr, useLocale } from "../shared/i18n";
 import { Button } from "../shared/ui/ios/controls";
-import { Modal } from "../shared/ui/ui";
+import { Modal, ToastHost } from "../shared/ui/ui";
 
 const Settings = lazy(() => import("../features/settings/Settings"));
+
+const supportsCssMax = typeof CSS !== "undefined" && typeof CSS.supports === "function" && CSS.supports("top", "max(1px, 2px)");
+function preSourceShellStyle(): CSSProperties | undefined {
+  if (!isMobile) return undefined;
+  const minBottom = platform === "android" ? "24px" : "16px";
+  return (supportsCssMax
+    ? {
+        "--sat": "max(var(--native-sat, 0px), env(safe-area-inset-top, 0px), 12px)",
+        "--sab": `max(var(--native-sab, 0px), env(safe-area-inset-bottom, 0px), ${minBottom})`,
+        "--sal": "max(var(--native-sal, 0px), env(safe-area-inset-left, 0px))",
+        "--sar": "max(var(--native-sar, 0px), env(safe-area-inset-right, 0px))",
+      }
+    : {
+        "--sat": "var(--native-sat, 12px)",
+        "--sab": `var(--native-sab, ${minBottom})`,
+        "--sal": "var(--native-sal, 0px)",
+        "--sar": "var(--native-sar, 0px)",
+      }) as CSSProperties;
+}
 
 function DeepLinkImportPrompt({ onImported }: { onImported: () => void }) {
   const { toast } = useStore();
@@ -56,8 +77,10 @@ function DeepLinkImportPrompt({ onImported }: { onImported: () => void }) {
 }
 
 function SourceGate() {
+  useLocale();
   const [sourceState, setSourceState] = useState<SourceStateSnapshot | null | "unsupported">(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [wide, setWide] = useState(() => window.innerWidth >= 860);
 
   const refresh = useCallback(() => {
     api.sourceState()
@@ -78,35 +101,79 @@ function SourceGate() {
     return () => window.removeEventListener("hg:source-changed", refresh);
   }, [refresh]);
 
+  useEffect(() => {
+    const onResize = () => setWide(window.innerWidth >= 860);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   const readyForApp =
     sourceState === "unsupported" ||
     (sourceState !== null && Boolean(sourceState.activeSourceId));
 
   useEffect(() => {
-    if (readyForApp) initAutoLine();
+    if (readyForApp) {
+      setSettingsOpen(false);
+      initAutoLine();
+    }
   }, [readyForApp]);
+
+  const preSourceBackRef = useRef<() => void>(() => {});
+  preSourceBackRef.current = () => {
+    if (runBack()) return;
+    if (settingsOpen) {
+      setSettingsOpen(false);
+      refresh();
+      return;
+    }
+    if (platform === "android") {
+      invoke("plugin:app|exit", { code: 0 }).catch(() => {});
+    }
+  };
+
+  useEffect(() => {
+    if (sourceState === null || readyForApp) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) {
+        if (e.key === "Escape") t.blur();
+        return;
+      }
+      if (e.key === "Escape") preSourceBackRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    let disposed = false;
+    let handle: { unregister: () => Promise<void> } | null = null;
+    if (platform === "android") {
+      addPluginListener("app", "back-button", () => preSourceBackRef.current())
+        .then((l) => { if (disposed) l.unregister().catch(() => {}); else handle = l; })
+        .catch(() => {});
+    }
+    return () => {
+      disposed = true;
+      window.removeEventListener("keydown", onKey);
+      handle?.unregister().catch(() => {});
+    };
+  }, [sourceState, readyForApp]);
 
   if (sourceState === null) return null;
   if (sourceState !== "unsupported" && !sourceState.activeSourceId) {
-    if (settingsOpen) {
-      return (
-        <>
-          <Suspense fallback={null}>
-            <Settings wide={window.innerWidth >= 860} onBack={() => { setSettingsOpen(false); refresh(); }} />
-          </Suspense>
-          <DeepLinkImportPrompt onImported={refresh} />
-        </>
-      );
-    }
     return (
-      <>
-        <SourceOnboarding
-          state={sourceState}
-          onChanged={refresh}
-          onOpenSettings={() => setSettingsOpen(true)}
-        />
+      <div className={`fixed inset-0 bg-bg plat-${platform}`} style={preSourceShellStyle()}>
+        {settingsOpen ? (
+          <Suspense fallback={null}>
+            <Settings wide={wide} onBack={() => { setSettingsOpen(false); refresh(); }} />
+          </Suspense>
+        ) : (
+          <SourceOnboarding
+            state={sourceState}
+            onChanged={refresh}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        )}
         <DeepLinkImportPrompt onImported={refresh} />
-      </>
+        <ToastHost />
+      </div>
     );
   }
   return (

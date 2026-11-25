@@ -39,6 +39,7 @@ const VERDICT_TEXT: Record<string, string> = {
   proxy_fail: "代理请求失败",
   http_fail: "HTTP 请求失败",
   http_status: "服务端返回错误状态码",
+  no_source: "尚未导入视频源",
   unknown: "信息不足",
 };
 
@@ -72,7 +73,9 @@ export function formatNetDiag(raw: Json): string {
 
   /* ── DNS ── */
   lines.push("── DNS ───────────────────────────");
-  if (str(dns.error)) {
+  if (dns.skipped) {
+    lines.push(`${pad("状态")}跳过 · ${str(dns.reason) || "已跳过"}`);
+  } else if (str(dns.error)) {
     const detail = str(dns.detail);
     lines.push(`${pad("状态")}失败 · ${str(dns.error)}${dns.timeout ? "（超时 6s）" : ` · ${ms(dns.ms)}`}`);
     if (detail) lines.push(`${pad("原因")}${detail}`);
@@ -104,9 +107,13 @@ export function formatNetDiag(raw: Json): string {
 
   /* ── HTTP ── */
   lines.push("── HTTP ──────────────────────────");
-  const status = num(http.status);
-  if (status != null) lines.push(`${pad("状态")}${status} · ${ms(http.ms)}`);
-  else lines.push(`${pad("状态")}失败 · ${ms(http.ms)}`);
+  if (http.skipped) {
+    lines.push(`${pad("状态")}跳过 · ${str(http.reason) || "已跳过"}`);
+  } else {
+    const status = num(http.status);
+    if (status != null) lines.push(`${pad("状态")}${status} · ${ms(http.ms)}`);
+    else lines.push(`${pad("状态")}失败 · ${ms(http.ms)}`);
+  }
   lines.push(`${pad("代理路径")}${http.proxy_configured === true ? "检测到匹配的应用 HTTP 代理配置" : http.proxy_configured === false ? "未检测到应用 HTTP 代理配置（VPN/TUN 仍可能接管）" : "未记录"}`);
   if (str(http.kind)) lines.push(`${pad("错误类型")}${str(http.kind)}`);
   if (str(http.error)) lines.push(`${pad("错误")}${str(http.error)}`);

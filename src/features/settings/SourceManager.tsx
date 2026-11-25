@@ -37,6 +37,7 @@ export default function SourceManager({ open, onClose }: { open: boolean; onClos
 
   useEffect(() => {
     if (open) void load();
+    else setScanOpen(false);
   }, [open]);
 
   const doImport = async () => {
@@ -246,8 +247,8 @@ export default function SourceManager({ open, onClose }: { open: boolean; onClos
   return (
     <>
       {isMobile
-        ? <Sheet open={open} onClose={onClose} label={tr("视频源")}>{body}</Sheet>
-        : <Modal open={open} onClose={onClose} label={tr("视频源")} width={520}>{body}</Modal>}
+        ? <Sheet open={open && !scanOpen} onClose={onClose} label={tr("视频源")}>{body}</Sheet>
+        : <Modal open={open && !scanOpen} onClose={onClose} label={tr("视频源")} width={520}>{body}</Modal>}
       <TvQrSyncModal open={scanOpen} initialView="scan" onClose={() => setScanOpen(false)} onSuccess={() => { void load(); }} />
     </>
   );

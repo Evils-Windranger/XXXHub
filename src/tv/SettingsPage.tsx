@@ -46,9 +46,9 @@ export default function SettingsPage(){
   const preferences=useContentPreferences(),display=useTvDisplay(),playback=usePlaybackPreferences(),pin=useTvPin(),updater=useTvUpdater();
   useEffect(()=>{
     let current=true, generation=0;
-    const refresh=()=>{const token=++generation;setAuto(autoLineEnabled());void Promise.all([api.lineState(),api.proxyState()]).then(([l,p])=>{if(current&&token===generation){setLines(l);setProxy(p);}}).catch(e=>{if(current&&token===generation)setMessage(String(e));});};
+    const refresh=()=>{const token=++generation;setAuto(autoLineEnabled());void Promise.all([api.lineState(),api.proxyState(),api.sourceState().catch(()=>null)]).then(([l,p,s])=>{if(current&&token===generation){setLines(l);setProxy(p);if(s)setSources(s);}}).catch(e=>{if(current&&token===generation)setMessage(String(e));});};
     refresh();
-    const events=["hg:line-changed","hg:proxy-changed","hg:auto-line-changed"];
+    const events=["hg:line-changed","hg:proxy-changed","hg:auto-line-changed","hg:source-changed"];
     events.forEach(name=>window.addEventListener(name,refresh));
     return()=>{current=false;events.forEach(name=>window.removeEventListener(name,refresh));};
   },[]);
@@ -68,9 +68,12 @@ export default function SettingsPage(){
   const run=async(action:()=>Promise<unknown>,success="已保存")=>{if(operation.current)return;operation.current=true;setBusy(true);setMessage("");try{await action();if(success)setMessage(success);}catch(e){setMessage(String(e));}finally{operation.current=false;setBusy(false);}};
   const submitManual=async(override?: string)=>{
     const raw=(override??manualDraft).trim();
-    if(!raw)return;
+    if(!raw||operation.current)return;
+    operation.current=true;
+    setBusy(true);
     setManualError("");
-    await run(async()=>{
+    setMessage("");
+    try{
       const s=await api.sourceImport(raw,true);
       setManualDraft("");
       setManualOpen(false);
@@ -78,7 +81,12 @@ export default function SettingsPage(){
       window.dispatchEvent(new Event("hg:line-changed"));
       window.dispatchEvent(new Event("hg:source-changed"));
       setMessage(`已导入 ${s.name} v${s.version}`);
-    },"");
+    }catch(e){
+      setManualError(e instanceof Error?e.message:String(e));
+    }finally{
+      operation.current=false;
+      setBusy(false);
+    }
   };
   const availableLines=[...new Map([...(lines?.fixed||[]),...mirrors].map(line=>[line.url,line])).values()];
   const hasUpdate=Boolean(updater.info?.has_update);
@@ -122,7 +130,7 @@ export default function SettingsPage(){
         ) : (
           <div data-tv-region="peer-list" data-tv-columns="1">
             {peers.map(peer=><div key={peer.pairId} className="tv-setting-row">
-              <span>{peer.name} <small>({peer.lastIp} · {formatSyncTime(peer.lastSyncedAt)})</small></span>
+              <span>{peer.name} <small>({[peer.lastIp, formatSyncTime(peer.lastSyncedAt)].filter(Boolean).join(" · ")})</small></span>
               <button data-tv-focus={`peer-rm-${peer.pairId}`} disabled={busy} onClick={()=>void run(async()=>{setPeers(await api.tvPeerRemove(peer.pairId));},"已解除配对")}>解除配对</button>
             </div>)}
           </div>
@@ -147,7 +155,7 @@ export default function SettingsPage(){
           </div>)}
         </div>
       </>}
-      {group==="线路"&&<><p>当前：{lines?hostOf(lines.base):"正在读取"}</p><div data-tv-region="line-options" data-tv-columns="1"><button disabled={busy} role="switch" aria-checked={auto} data-tv-focus="auto-line" onClick={()=>void run(async()=>{await setAutoLine(!auto);setAuto(!auto);})}>自动选线：{auto?"开启":"关闭"}</button><button data-tv-focus="pick-line" disabled={busy||!auto} onClick={()=>void run(async()=>{await pickLine("tv-settings",true);setLines(await api.lineState());})}>重新检测可用线路</button>{mirrorError&&<p role="status">{mirrorError}</p>}<button data-tv-focus="refresh-mirrors" disabled={busy} onClick={()=>void run(readMirrors,"镜像线路已更新")}>刷新镜像线路</button>{availableLines.map(line=><button key={line.url} data-tv-focus={`line-${line.url}`} role="radio" aria-checked={lines?.base===line.url} disabled={busy} onClick={()=>void run(async()=>{await setAutoLine(false);setAuto(false);await api.lineSet(line.url);window.dispatchEvent(new Event("hg:line-changed"));setLines(await api.lineState());})}>{line.name||hostOf(line.url)}</button>)}</div></>}
+      {group==="线路"&&<><p>当前：{lines?(hostOf(lines.base)||"未设置"):"正在读取"}</p><div data-tv-region="line-options" data-tv-columns="1"><button disabled={busy} role="switch" aria-checked={auto} data-tv-focus="auto-line" onClick={()=>void run(async()=>{await setAutoLine(!auto);setAuto(!auto);})}>自动选线：{auto?"开启":"关闭"}</button><button data-tv-focus="pick-line" disabled={busy||!auto} onClick={()=>void run(async()=>{await pickLine("tv-settings",true);setLines(await api.lineState());})}>重新检测可用线路</button>{mirrorError&&<p role="status">{mirrorError}</p>}<button data-tv-focus="refresh-mirrors" disabled={busy} onClick={()=>void run(readMirrors,"镜像线路已更新")}>刷新镜像线路</button>{availableLines.map(line=><button key={line.url} data-tv-focus={`line-${line.url}`} role="radio" aria-checked={lines?.base===line.url} disabled={busy} onClick={()=>void run(async()=>{await setAutoLine(false);setAuto(false);await api.lineSet(line.url);window.dispatchEvent(new Event("hg:line-changed"));setLines(await api.lineState());})}>{line.name||hostOf(line.url)}</button>)}</div></>}
       {group==="网络"&&<><p>使用电视系统代理，或直接连接。网络设置影响当前应用。</p><div data-tv-region="proxy-options" data-tv-columns="1">{(["system","off"] as const).map(mode=><button key={mode} disabled={busy} role="radio" aria-checked={proxy?.mode===mode} data-tv-focus={`proxy-${mode}`} onClick={()=>void run(async()=>{setProxy(await api.proxySet(mode,""));window.dispatchEvent(new Event("hg:proxy-changed"));})}>{mode==="system"?"跟随系统代理":"直连"}</button>)}</div></>}
       {group==="缓存"&&<><p>清理图片与媒体缓存，保留本地片库、迁移记录及偏好。搜索目录可在搜索页单独刷新。</p><button data-tv-focus="clear-cache" disabled={busy} onClick={()=>void run(async()=>{await api.clearCache();resetCachedTvUpdate();},"缓存已清理，片库和偏好已保留")}>清理缓存</button></>}
       {group==="关于"&&<><h3>HGhubX TV {APP_VERSION}</h3>

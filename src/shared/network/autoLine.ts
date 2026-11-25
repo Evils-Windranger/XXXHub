@@ -87,6 +87,9 @@ export async function pickLine(reason: string, force = false): Promise<boolean> 
       const candidates = result.pick.candidates
         .map((candidate) => `${candidate.tier}:${candidate.ok ? "ok" : candidate.reachable ? "reachable" : "down"}/${candidate.ms}ms`)
         .join(",");
+      if (result.pick.reason === "no-source") {
+        return false;
+      }
       if (result.pick.reason === "all-down") {
         down = true;
         logLine(`[line] auto(${reason}) all-down, keep ${hostOf(result.base)} | ${candidates}`);
@@ -149,6 +152,9 @@ async function check(reason: string): Promise<void> {
     const health = await api.lineHealth();
     if (!health) {
       schedule(HEALTH_STEPS[step]);
+      return;
+    }
+    if (!health.base) {
       return;
     }
     if (health.ok) {

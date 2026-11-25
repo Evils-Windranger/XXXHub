@@ -27,6 +27,8 @@ export default function TvLanPushPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [synced, setSynced] = useState<SyncDoneInfo | null>(null);
+  const [startError, setStartError] = useState("");
+  const [retryTick, setRetryTick] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
   const lastLegacyRef = useRef<string>("");
   const doneTimerRef = useRef<number>(0);
@@ -38,10 +40,11 @@ export default function TvLanPushPanel({
   useEffect(() => {
     let alive = true;
     let unlistenLegacy: (() => void) | null = null;
+    setStartError("");
 
     void api.sourceLanPushStart()
-      .then((s) => { if (alive) setSession(s); })
-      .catch(() => {});
+      .then((s) => { if (alive) { setSession(s); setStartError(""); } })
+      .catch((e) => { if (alive) setStartError(e instanceof Error ? e.message : String(e || "局域网服务启动失败")); });
 
     const onSyncApplied = (ev: Event) => {
       if (!alive) return;
@@ -102,7 +105,7 @@ export default function TvLanPushPanel({
       unlistenLegacy?.();
       void api.sourceLanPushStop().catch(() => {});
     };
-  }, []);
+  }, [retryTick]);
 
   const submit = async (override?: string) => {
     const raw = (override ?? draft).trim();
@@ -129,9 +132,11 @@ export default function TvLanPushPanel({
   return (
     <>
       <div className={`tv-connect-card${compact ? " is-compact" : ""}`}>
-        <div className="tv-connect-qr">
-          {session?.url && <QrCode value={session.url} size={240} quietZone={2} />}
-        </div>
+        {session?.url && (
+          <div className="tv-connect-qr">
+            <QrCode value={session.url} size={240} quietZone={2} />
+          </div>
+        )}
 
         <div className="tv-connect-info">
           <div className="tv-connect-title">手机扫码或局域网直连</div>
@@ -152,6 +157,8 @@ export default function TvLanPushPanel({
                 {synced.hasPrefs && <span className="tv-sync-pill">✓ 偏好设置</span>}
               </div>
             </div>
+          ) : startError && !session?.url ? (
+            <div role="alert" className="tv-lan-error">{startError}</div>
           ) : (
             <div className="tv-connect-status" role="status">
               <span className="tv-connect-dot" aria-hidden="true" />
@@ -161,6 +168,11 @@ export default function TvLanPushPanel({
           )}
 
           <div className="tv-options tv-connect-actions" data-tv-region="source-import" data-tv-columns="1">
+            {startError && !session?.url && (
+              <button data-tv-focus="source-retry-lan" onClick={() => setRetryTick((n) => n + 1)}>
+                重试
+              </button>
+            )}
             <button data-tv-focus="source-manual-open" onClick={() => { setError(""); setManualOpen(true); }}>
               手动输入 / 本地文件
             </button>

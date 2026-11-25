@@ -187,7 +187,7 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
         <span className="w-8 h-8 rounded-full bg-s3 flex items-center justify-center text-primary"><ISettings size={16} /></span>
         <div className="flex-1 min-w-0">
           <div className="text-[15px] font-bold text-on leading-tight">{tr("线路")}</div>
-          <div className="text-[12px] text-mut mt-0.5 truncate">{tr("当前：{0}", state ? hostOf(state.base) : tr("读取中…"))}</div>
+          <div className="text-[12px] text-mut mt-0.5 truncate">{tr("当前：{0}", state ? (hostOf(state.base) || tr("未设置")) : tr("读取中…"))}</div>
         </div>
         <Button onClick={close} disabled={!!switching} aria-label={tr("关闭")} className="min-w-12 min-h-12 rounded-full bg-s3/80 flex items-center justify-center text-mut pressable"><IClose size={16} /></Button>
       </div>
@@ -228,7 +228,7 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
             <Row key={it.url} item={it} current={state?.base === it.url} probe={probes[it.url]}
               busy={probing === it.url} disabled={busyAll} onPick={pick} onProbe={(u) => probe([{ url: u }], u)} />
           ))}
-          {!fixed.length && <div className="px-3.5 py-3 text-[12px] text-mut">{tr("读取中…")}</div>}
+          {!fixed.length && <div className="px-3.5 py-3 text-[12px] text-mut">{ready ? tr("暂无视频源") : tr("读取中…")}</div>}
         </Surface>
 
         <GroupHead

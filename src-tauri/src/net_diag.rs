@@ -338,7 +338,9 @@ fn verdict(dns: &Value, tcp: &Value, http: &Value) -> (&'static str, String, Vec
 /// Editable URL is returned only to the settings form; effective is always redacted.
 pub fn proxy_state() -> Value {
     let config = crate::proxy::snapshot();
-    let target = url::Url::parse(&base()).expect("validated base");
+    let current = base();
+    let target = url::Url::parse(&current)
+        .unwrap_or_else(|_| url::Url::parse("https://example.invalid").expect("static fallback url"));
     let route = ProxyRoute::for_config(&config, &target);
     let effective = if !route.active {
         None
@@ -451,11 +453,49 @@ fn proxy_probe_error(error: reqwest::Error) -> String {
     .into()
 }
 
+fn diag_env_json() -> Value {
+    json!({
+        "HTTP_PROXY": std::env::var("HTTP_PROXY").ok().map(|p| redact_proxy(&p)),
+        "HTTPS_PROXY": std::env::var("HTTPS_PROXY").ok().map(|p| redact_proxy(&p)),
+        "ALL_PROXY": std::env::var("ALL_PROXY").ok().map(|p| redact_proxy(&p)),
+        "NO_PROXY": std::env::var("NO_PROXY").ok().map(|_| "[已配置，列表已隐藏]"),
+        "HGHUBX_PROXY": proxy_override().map(|p| redact_proxy(&p)),
+        "GNOME_PROXY": gnome_proxy().map(|p| redact_proxy(&p)),
+        "system_proxy": system_proxy_enabled(),
+        "app_proxy_mode": crate::proxy::mode().as_str(),
+        "app_proxy": crate::proxy::custom_url().as_deref().map(redact_proxy),
+    })
+}
+
+fn diag_runtime_json() -> Value {
+    json!({
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "ver": option_env!("HGHUBX_APP_VERSION")
+            .filter(|v| !v.is_empty())
+            .unwrap_or(env!("CARGO_PKG_VERSION")),
+    })
+}
+
 /// 网络自检：DNS / TCP / HTTP / 代理环境变量，用于远程定位「打不开」。
 ///
 /// 结论直接给在 `verdict` / `summary` / `advice` 里，用户复制出去就能看懂。
 pub async fn diagnose() -> Value {
     let cur = base();
+    if cur.is_empty() {
+        return json!({
+            "verdict": "no_source",
+            "summary": "尚未导入视频源，请先导入视频源后再做网络诊断",
+            "advice": ["在「设置 → 视频源」或启动引导页导入视频源后，再重新执行网络诊断"],
+            "base": "",
+            "host": "",
+            "dns": { "skipped": true, "reason": "尚未导入视频源" },
+            "tcp": { "skipped": true, "reason": "尚未导入视频源" },
+            "http": { "skipped": true, "reason": "尚未导入视频源", "proxy_configured": false },
+            "env": diag_env_json(),
+            "runtime": diag_runtime_json(),
+        });
+    }
     let host = url::Url::parse(&cur)
         .ok()
         .and_then(|u| u.host_str().map(|h| h.to_string()))
@@ -525,24 +565,8 @@ pub async fn diagnose() -> Value {
         "dns": dns,
         "tcp": tcp,
         "http": http,
-        "env": {
-            "HTTP_PROXY": std::env::var("HTTP_PROXY").ok().map(|p| redact_proxy(&p)),
-            "HTTPS_PROXY": std::env::var("HTTPS_PROXY").ok().map(|p| redact_proxy(&p)),
-            "ALL_PROXY": std::env::var("ALL_PROXY").ok().map(|p| redact_proxy(&p)),
-            "NO_PROXY": std::env::var("NO_PROXY").ok().map(|_| "[已配置，列表已隐藏]"),
-            "HGHUBX_PROXY": proxy_override().map(|p| redact_proxy(&p)),
-            "GNOME_PROXY": gnome_proxy().map(|p| redact_proxy(&p)),
-            "system_proxy": system_proxy_enabled(),
-            "app_proxy_mode": crate::proxy::mode().as_str(),
-            "app_proxy": crate::proxy::custom_url().as_deref().map(redact_proxy),
-        },
-        "runtime": {
-            "os": std::env::consts::OS,
-            "arch": std::env::consts::ARCH,
-            "ver": option_env!("HGHUBX_APP_VERSION")
-                .filter(|v| !v.is_empty())
-                .unwrap_or(env!("CARGO_PKG_VERSION")),
-        },
+        "env": diag_env_json(),
+        "runtime": diag_runtime_json(),
     })
 }
 

@@ -2,8 +2,9 @@ import { useRef, useState } from "react";
 import { api, type SourceStateSnapshot } from "../../shared/api/api";
 import { useStore } from "../../shared/model/store";
 import { Button, Surface, TextArea } from "../../shared/ui/ios/controls";
-import { ILink, ISettings, Logo } from "../../shared/ui/icons";
+import { ILink, IScan, ISettings, Logo } from "../../shared/ui/icons";
 import { tr } from "../../shared/i18n";
+import TvQrSyncModal from "../../features/settings/TvQrSyncModal";
 
 export default function SourceOnboarding({
   state,
@@ -18,6 +19,7 @@ export default function SourceOnboarding({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [scanOpen, setScanOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const notify = () => {
@@ -101,6 +103,7 @@ export default function SourceOnboarding({
 
           <Surface className="rounded-(--r-lg) bg-s2 p-4 space-y-3">
             <div className="flex items-center justify-end gap-2">
+              <Button onClick={() => setScanOpen(true)} className="h-7 px-2.5 rounded-(--r-sm) bg-s3 text-[12px] text-on pressable inline-flex items-center gap-1"><IScan size={12} /> {tr("扫码")}</Button>
               <Button onClick={pasteClipboard} className="h-7 px-2.5 rounded-(--r-sm) bg-s3 text-[12px] text-on pressable">{tr("粘贴")}</Button>
               <Button onClick={() => fileRef.current?.click()} className="h-7 px-2.5 rounded-(--r-sm) bg-s3 text-[12px] text-on pressable">{tr("文件")}</Button>
               <input ref={fileRef} type="file" accept=".json,.hgsrc,.txt" className="hidden" onChange={(e) => void onFilePick(e.target.files?.[0])} />
@@ -139,6 +142,7 @@ export default function SourceOnboarding({
           )}
         </div>
       </div>
+      <TvQrSyncModal open={scanOpen} initialView="scan" onClose={() => setScanOpen(false)} onSuccess={notify} />
     </div>
   );
 }

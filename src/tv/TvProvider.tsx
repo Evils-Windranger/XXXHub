@@ -69,7 +69,6 @@ export function TvProvider({ children }: { children: ReactNode }) {
           setSource(boot.base);
         }
         setReady(true);
-        initAutoLine();
       } catch (err) {
         if (!disposed) setError(String(err));
       }
@@ -81,6 +80,10 @@ export function TvProvider({ children }: { children: ReactNode }) {
       window.clearTimeout(noticeTimerRef.current);
     };
   }, [retryId, reload]);
+
+  useEffect(() => {
+    if (ready && source) initAutoLine();
+  }, [ready, source]);
 
   useEffect(() => subscribeLibrary(() => { void reload().catch((e) => setError(String(e))); }), [reload]);
 

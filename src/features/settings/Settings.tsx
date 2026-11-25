@@ -38,6 +38,7 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
   const [pairedCount, setPairedCount] = useState(0);
   const [sourceHint, setSourceHint] = useState("");
   const [lineBase, setLineBase] = useState("");
+  const [lineLoaded, setLineLoaded] = useState(false);
   const [autoLineOn, setAutoLineOn] = useState(autoLineEnabled);
   const clearBusy = useRef(false);
   const [clearError, setClearError] = useState("");
@@ -72,7 +73,7 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
 
   useEffect(() => { void initPlaybackLog(); }, []);
 
-  const readLine = () => { api.lineState().then((state) => { setLineBase(state.base); setLineError(""); }).catch(() => setLineError(tr("线路读取失败，点击重新选择"))); };
+  const readLine = () => { api.lineState().then((state) => { setLineBase(state.base); setLineError(""); setLineLoaded(true); }).catch(() => setLineError(tr("线路读取失败，点击重新选择"))); };
   const readSource = () => {
     api.sourceState().then((s) => {
       const active = s.sources.find((x) => x.active);
@@ -87,11 +88,11 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
     sync();
     window.addEventListener("hg:line-changed", sync);
     window.addEventListener("hg:auto-line-changed", sync);
-    window.addEventListener("hg:source-changed", readSource);
+    window.addEventListener("hg:source-changed", sync);
     return () => {
       window.removeEventListener("hg:line-changed", sync);
       window.removeEventListener("hg:auto-line-changed", sync);
-      window.removeEventListener("hg:source-changed", readSource);
+      window.removeEventListener("hg:source-changed", sync);
     };
   }, []);
 
@@ -262,7 +263,7 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
               <span className="ios-setting-icon"><IBoltF size={16} /></span>
               <div className="flex-1 min-w-0">
                 <div className="text-[14px] text-on">{tr("播放源")}</div>
-                <div className="text-[12px] text-mut truncate">{lineError || (lineBase ? hostOf(lineBase) : tr("读取中…"))}</div>
+                <div className="text-[12px] text-mut truncate">{lineError || (lineBase ? hostOf(lineBase) : lineLoaded ? tr("未设置") : tr("读取中…"))}</div>
               </div>
               <IChevR size={15} className="text-mut" />
             </Button>

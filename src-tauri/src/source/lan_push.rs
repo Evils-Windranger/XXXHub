@@ -935,6 +935,10 @@ async fn ensure_server_started(
     {
         let mut guard = SERVER.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(active) = guard.as_mut() {
+            let fresh_ip = detect_lan_ipv4();
+            if fresh_ip != "127.0.0.1" || active.ip.is_empty() {
+                active.ip = fresh_ip;
+            }
             if let Some(name) = device_name {
                 active.name = clean_device_name(&name, &active.name);
             }

@@ -10,6 +10,7 @@ import {
   type TvSyncData,
 } from "../../shared/api/api";
 import { decodeQrFromFile, decodeQrFromVideo, parseTvLanTarget } from "../../shared/lib/qrDecode";
+import { registerOverlayBack } from "../../shared/lib/back";
 import { useContentPreferences, mergeContentPreferences } from "../../shared/model/contentPreferences";
 import { useStore } from "../../shared/model/store";
 import { autoLineEnabled } from "../../shared/network/autoLine";
@@ -92,7 +93,7 @@ export default function TvQrSyncModal({
   const fileRef = useRef<HTMLInputElement>(null);
   const decodingRef = useRef(false);
   const lineBaseRef = useRef("");
-  const hasActiveSourceRef = useRef(true);
+  const hasActiveSourceRef = useRef(false);
   const autoCloseRef = useRef(0);
   const busyRef = useRef(false);
 
@@ -146,6 +147,42 @@ export default function TvQrSyncModal({
       lineBaseRef.current = "";
     });
   }, [open, initialView, refreshDevices, stopCamera]);
+
+  const scanBackRef = useRef({ manualOpen, codeTarget, onClose });
+  scanBackRef.current = { manualOpen, codeTarget, onClose };
+  useEffect(() => {
+    if (!open || view !== "scan") return undefined;
+    const handleBack = (): boolean => {
+      if (busyRef.current) return true;
+      const cur = scanBackRef.current;
+      if (cur.manualOpen) {
+        setManualOpen(false);
+        setError("");
+        return true;
+      }
+      if (cur.codeTarget) {
+        setCodeTarget(null);
+        setPinCode("");
+        setError("");
+        return true;
+      }
+      cur.onClose();
+      return true;
+    };
+    const removeOverlayBack = registerOverlayBack(handleBack);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.isComposing) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (!event.repeat) handleBack();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      removeOverlayBack();
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [open, view]);
 
   const buildSyncPayload = useCallback((): TvSyncData => ({
     favs,
@@ -439,7 +476,7 @@ export default function TvQrSyncModal({
         role="dialog"
         aria-modal="true"
         aria-label={tr("扫一扫")}
-        className="fixed inset-0 z-[240] bg-black text-white flex flex-col select-none"
+        className="fixed inset-0 z-[290] bg-black text-white flex flex-col select-none"
       >
         {fileInput}
         <video
@@ -666,7 +703,8 @@ export default function TvQrSyncModal({
         </div>
       </div>
     );
-    return typeof document !== "undefined" ? createPortal(scanOverlay, document.body) : scanOverlay;
+    const portalRoot = typeof document !== "undefined" ? (document.getElementById("root") ?? document.body) : null;
+    return portalRoot ? createPortal(scanOverlay, portalRoot) : scanOverlay;
   }
 
   // "hub" view: Paired & discovered TVs inside Settings Sheet/Modal
