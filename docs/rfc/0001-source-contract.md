@@ -47,7 +47,7 @@
   "updateUrls": [],
   "signature": {
     "algorithm": "ed25519",
-    "keyId": "exp-dev-2026",
+    "keyId": "hghubx-2026",
     "publicKey": "<32-byte raw pubkey base64url>",
     "sig": "<64-byte ed25519 sig base64url>"
   }

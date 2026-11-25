@@ -4,18 +4,15 @@
 //   2) Legado-style clipboard share code (hghubx-src://<gzip+base64url>)
 //
 // Usage:
-//   node scripts/pack-source.mjs examples/sources/huangguo [--out-dir /tmp/out] [--sign-dev]
-//   node scripts/pack-source.mjs examples/sources/demo-offline --sign-dev --print-code
+//   node scripts/pack-source.mjs <source-dir> [--out-dir /tmp/out] [--print-code]
+//   node scripts/pack-source.mjs <source-dir> [--key-file <pem>] [--key-id <id>] [--out-dir /tmp/out]
 
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
 
-// Experimental prototype keypair matching `TRUSTED_KEYS["exp-dev-2026"]` in src-tauri/src/source/verify.rs.
-// EXPERIMENTAL ONLY — replace with offline maintainer key for production builds.
-const EXP_DEV_KEY_ID = "exp-dev-2026";
-const EXP_DEV_PKCS8_B64 = "MC4CAQAwBQYDK2VwBCIEIKTl5Ek9vQjhNCsOmKAMnJoLFTcKAmx6i0C2u5Y5kMcF";
+const DEFAULT_KEY_ID = "custom";
 
 function sha256Hex(text) {
   return crypto.createHash("sha256").update(text, "utf8").digest("hex");
@@ -52,11 +49,10 @@ function encodeShareCode(pkg) {
 }
 
 function parseArgs(argv) {
-  const args = { dir: "", outDir: "", signDev: false, keyFile: "", keyId: "", printCode: false };
+  const args = { dir: "", outDir: "", keyFile: "", keyId: "", printCode: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--sign-dev") args.signDev = true;
-    else if (a === "--print-code") args.printCode = true;
+    if (a === "--print-code") args.printCode = true;
     else if (a === "--out-dir") args.outDir = argv[++i] || "";
     else if (a === "--key-file") args.keyFile = argv[++i] || "";
     else if (a === "--key-id") args.keyId = argv[++i] || "";
@@ -67,7 +63,7 @@ function parseArgs(argv) {
 
 const args = parseArgs(process.argv.slice(2));
 if (!args.dir) {
-  console.error("Usage: node scripts/pack-source.mjs <source-dir> [--sign-dev | --key-file <pem>] [--out-dir <dir>] [--print-code]");
+  console.error("Usage: node scripts/pack-source.mjs <source-dir> [--key-file <pem>] [--key-id <id>] [--out-dir <dir>] [--print-code]");
   process.exit(1);
 }
 
@@ -88,17 +84,15 @@ const pkg = {
   updateUrls,
 };
 
-if (args.signDev || args.keyFile) {
-  const privateKey = args.keyFile
-    ? crypto.createPrivateKey(fs.readFileSync(args.keyFile, "utf8"))
-    : crypto.createPrivateKey({ key: Buffer.from(EXP_DEV_PKCS8_B64, "base64"), format: "der", type: "pkcs8" });
+if (args.keyFile) {
+  const privateKey = crypto.createPrivateKey(fs.readFileSync(args.keyFile, "utf8"));
   const publicKey = crypto.createPublicKey(privateKey);
   const spki = publicKey.export({ type: "spki", format: "der" });
   const rawPub = spki.subarray(spki.length - 32);
   const sig = crypto.sign(null, canonicalPayload(pkg), privateKey);
   pkg.signature = {
     algorithm: "ed25519",
-    keyId: args.keyId || (args.signDev ? EXP_DEV_KEY_ID : "custom"),
+    keyId: args.keyId || DEFAULT_KEY_ID,
     publicKey: rawPub.toString("base64url"),
     sig: sig.toString("base64url"),
   };

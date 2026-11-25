@@ -7,14 +7,10 @@ use ring::signature::{UnparsedPublicKey, ED25519};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Trusted Ed25519 public keys (raw 32-byte keys, Base64URL without padding).
-/// Multiple keys are supported simultaneously for smooth key rotation.
-///
-/// NOTE: `exp-dev-2026` is the experimental prototype keypair for branch `exp/source-plugin-v1`.
-/// Production builds should replace this list with maintainer-owned offline keys.
-pub const TRUSTED_KEYS: &[(&str, &str)] = &[
-    ("exp-dev-2026", "NDaDYRsR0srXjLylBM8OjXPL9jsPtBtjK3mO0-ncjqg"),
-];
+/// Pure-shell client ships with NO built-in trusted signing keys.
+/// Any community source (unsigned or self-signed) can be imported freely; if a package
+/// carries an Ed25519 signature + publicKey, integrity is still verified to catch tampering.
+pub const TRUSTED_KEYS: &[(&str, &str)] = &[];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -85,39 +81,43 @@ fn verify_ed25519(raw_pub: &[u8], payload: &[u8], sig_b64url: &str) -> Result<()
         .map_err(|_| "视频源签名验证失败：内容可能已被篡改".into())
 }
 
-fn find_trusted_key_by_id(key_id: &str) -> Option<&'static str> {
-    TRUSTED_KEYS
-        .iter()
+fn find_trusted_key_by_id<'a>(keys: &'a [(&'a str, &'a str)], key_id: &str) -> Option<&'a str> {
+    keys.iter()
         .find(|(id, _)| *id == key_id)
         .map(|(_, key)| *key)
 }
 
-fn find_trusted_id_by_key(pub_b64url: &str) -> Option<&'static str> {
-    TRUSTED_KEYS
-        .iter()
+fn find_trusted_id_by_key<'a>(keys: &'a [(&'a str, &'a str)], pub_b64url: &str) -> Option<&'a str> {
+    keys.iter()
         .find(|(_, key)| *key == pub_b64url)
         .map(|(id, _)| *id)
 }
 
-/// Verify package signature against trusted keys and user opt-in policy.
-/// A tampered/invalid signature is ALWAYS rejected even when `allow_untrusted` is enabled.
+/// Verify package integrity when a signature is present.
+/// Unsigned and self-signed community sources are allowed freely (no built-in gatekeeping);
+/// a tampered/corrupted signature is still rejected.
 pub fn verify_package(pkg: &SourcePackage, allow_untrusted: bool) -> Result<SignatureInfo, String> {
+    verify_package_with_keys(pkg, allow_untrusted, TRUSTED_KEYS)
+}
+
+pub(crate) fn verify_package_with_keys(
+    pkg: &SourcePackage,
+    _allow_untrusted: bool,
+    trusted_keys: &[(&str, &str)],
+) -> Result<SignatureInfo, String> {
     let payload = canonical_payload(pkg);
     let Some(sig) = &pkg.signature else {
-        if allow_untrusted {
-            return Ok(SignatureInfo {
-                status: "unsigned".into(),
-                key_id: String::new(),
-                fingerprint: String::new(),
-            });
-        }
-        return Err("该视频源未签名；默认仅允许受信任签名源，如需试用自签/测试源请在视频源管理中开启「允许自签/测试源」".into());
+        return Ok(SignatureInfo {
+            status: "unsigned".into(),
+            key_id: String::new(),
+            fingerprint: String::new(),
+        });
     };
     if !sig.algorithm.eq_ignore_ascii_case("ed25519") {
         return Err(format!("不支持的签名算法：{}", sig.algorithm));
     }
 
-    if let Some(trusted_b64) = find_trusted_key_by_id(sig.key_id.trim()) {
+    if let Some(trusted_b64) = find_trusted_key_by_id(trusted_keys, sig.key_id.trim()) {
         let raw_pub = B64_URL
             .decode(trusted_b64.as_bytes())
             .map_err(|_| "内置受信任公钥格式异常")?;
@@ -135,29 +135,25 @@ pub fn verify_package(pkg: &SourcePackage, allow_untrusted: bool) -> Result<Sign
             .map_err(|_| "视频源附带公钥编码无效")?;
         verify_ed25519(&raw_pub, &payload, &sig.sig)?;
         let fp = key_fingerprint(&raw_pub);
-        if let Some(trusted_id) = find_trusted_id_by_key(pub_b64) {
+        if let Some(trusted_id) = find_trusted_id_by_key(trusted_keys, pub_b64) {
             return Ok(SignatureInfo {
                 status: "trusted".into(),
                 key_id: trusted_id.to_string(),
                 fingerprint: fp,
             });
         }
-        if allow_untrusted {
-            return Ok(SignatureInfo {
-                status: "self_signed".into(),
-                key_id: sig.key_id.trim().to_string(),
-                fingerprint: fp,
-            });
-        }
-        return Err(format!(
-            "视频源使用未受信任的自签公钥（指纹 {fp}）；如确认来源可靠，请先开启「允许自签/测试源」再导入"
-        ));
+        return Ok(SignatureInfo {
+            status: "self_signed".into(),
+            key_id: sig.key_id.trim().to_string(),
+            fingerprint: fp,
+        });
     }
 
-    Err(format!(
-        "未知的签名密钥 ID（{}），且未附带公钥",
-        sig.key_id
-    ))
+    Ok(SignatureInfo {
+        status: "unsigned".into(),
+        key_id: sig.key_id.trim().to_string(),
+        fingerprint: String::new(),
+    })
 }
 
 #[cfg(test)]

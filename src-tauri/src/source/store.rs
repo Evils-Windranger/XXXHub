@@ -36,11 +36,26 @@ pub struct SourceStateSnapshot {
     pub sources: Vec<InstalledSourceSummary>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+fn default_allow_untrusted() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct RegistryFile {
     active_source_id: Option<String>,
+    #[serde(default = "default_allow_untrusted")]
     allow_untrusted: bool,
     records: HashMap<String, StoredRecord>,
+}
+
+impl Default for RegistryFile {
+    fn default() -> Self {
+        Self {
+            active_source_id: None,
+            allow_untrusted: true,
+            records: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

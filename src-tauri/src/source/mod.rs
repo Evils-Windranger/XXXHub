@@ -39,14 +39,21 @@ mod tests {
     };
     use super::runtime::invoke_source;
     use super::store::SourceStore;
-    use super::verify::{sign_for_test, verify_package};
-    use base64::engine::general_purpose::STANDARD as B64_STD;
+    use super::verify::{sign_for_test, verify_package, verify_package_with_keys, TRUSTED_KEYS};
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64_URL;
     use base64::Engine;
+    use ring::rand::SystemRandom;
+    use ring::signature::{Ed25519KeyPair, KeyPair};
     use serde_json::json;
     use std::sync::Arc;
 
-    // Experimental dev PKCS#8 private key matching `TRUSTED_KEYS["exp-dev-2026"]`.
-    const DEV_PKCS8_B64: &str = "MC4CAQAwBQYDK2VwBCIEIKTl5Ek9vQjhNCsOmKAMnJoLFTcKAmx6i0C2u5Y5kMcF";
+    fn ephemeral_keypair() -> (Vec<u8>, String) {
+        let rng = SystemRandom::new();
+        let doc = Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
+        let pair = Ed25519KeyPair::from_pkcs8(doc.as_ref()).unwrap();
+        let pub_b64url = B64_URL.encode(pair.public_key().as_ref());
+        (doc.as_ref().to_vec(), pub_b64url)
+    }
 
     fn sample_pkg(version: &str, code: &str) -> SourcePackage {
         SourcePackage {
@@ -141,27 +148,33 @@ module.exports = {
 
     #[test]
     fn share_code_roundtrip_and_ed25519_verification() {
+        // Pure-shell client ships with zero built-in trusted keys.
+        assert!(TRUSTED_KEYS.is_empty());
+
         let mut pkg = sample_pkg("1.0.0", FAKE_SOURCE_JS);
-        let pkcs8 = B64_STD.decode(DEV_PKCS8_B64).unwrap();
-        sign_for_test(&mut pkg, &pkcs8, "exp-dev-2026", true);
+        let (pkcs8, pub_b64) = ephemeral_keypair();
+        sign_for_test(&mut pkg, &pkcs8, "test-ephemeral", true);
 
         let code = encode_share_code(&pkg).unwrap();
         assert!(code.starts_with("hghubx-src://"));
         let decoded = decode_package_input(&code).unwrap();
         validate_package(&decoded).unwrap();
-        let info = verify_package(&decoded, false).unwrap();
-        assert_eq!(info.status, "trusted");
-        assert_eq!(info.key_id, "exp-dev-2026");
+        // Self-signed community source imports freely while still verifying signature integrity.
+        assert_eq!(verify_package(&decoded, false).unwrap().status, "self_signed");
 
-        // Tampering a single byte of code must ALWAYS fail verification, even with allow_untrusted=true.
+        let trusted = [("test-ephemeral", pub_b64.as_str())];
+        let info = verify_package_with_keys(&decoded, false, &trusted).unwrap();
+        assert_eq!(info.status, "trusted");
+        assert_eq!(info.key_id, "test-ephemeral");
+
+        // Tampering a single byte of a signed package must ALWAYS fail integrity verification.
         let mut tampered = decoded.clone();
         tampered.code.push(' ');
         assert!(verify_package(&tampered, true).is_err());
 
-        // Unsigned rejected by default, accepted only with allow_untrusted=true.
+        // Unsigned community sources also import freely out of the box.
         let unsigned = sample_pkg("1.0.0", FAKE_SOURCE_JS);
-        assert!(verify_package(&unsigned, false).is_err());
-        assert_eq!(verify_package(&unsigned, true).unwrap().status, "unsigned");
+        assert_eq!(verify_package(&unsigned, false).unwrap().status, "unsigned");
     }
 
     #[test]
@@ -172,17 +185,18 @@ module.exports = {
         store.bind(&dir);
 
         let mut p1 = sample_pkg("1.0.0", FAKE_SOURCE_JS);
-        let pkcs8 = B64_STD.decode(DEV_PKCS8_B64).unwrap();
-        sign_for_test(&mut p1, &pkcs8, "exp-dev-2026", false);
-        let sig1 = verify_package(&p1, false).unwrap();
+        let (pkcs8, pub_b64) = ephemeral_keypair();
+        let trusted = [("test-ephemeral", pub_b64.as_str())];
+        sign_for_test(&mut p1, &pkcs8, "test-ephemeral", false);
+        let sig1 = verify_package_with_keys(&p1, false, &trusted).unwrap();
         let s1 = store.install(p1, sig1, true).unwrap();
         assert_eq!(s1.version, "1.0.0");
         assert!(s1.active);
         store.kv_set(&s1.id, "cursor", Some("abc".into())).unwrap();
 
         let mut p2 = sample_pkg("1.1.0", FAKE_SOURCE_JS);
-        sign_for_test(&mut p2, &pkcs8, "exp-dev-2026", false);
-        let sig2 = verify_package(&p2, false).unwrap();
+        sign_for_test(&mut p2, &pkcs8, "test-ephemeral", false);
+        let sig2 = verify_package_with_keys(&p2, false, &trusted).unwrap();
         let s2 = store.install(p2, sig2, false).unwrap();
         assert_eq!(s2.version, "1.1.0");
         assert_eq!(s2.previous_version.as_deref(), Some("1.0.0"));
@@ -265,10 +279,11 @@ module.exports = {
         m.runtime.entry = "inline".into();
         let code = std::fs::read_to_string(base.join("source.js")).unwrap();
         let mut ex = SourcePackage { schema_version: 1, manifest: m, code, update_urls: vec![], signature: None };
-        let pkcs8 = B64_STD.decode(DEV_PKCS8_B64).unwrap();
-        sign_for_test(&mut ex, &pkcs8, "exp-dev-2026", true);
+        let (pkcs8, pub_b64) = ephemeral_keypair();
+        let trusted = [("test-ephemeral", pub_b64.as_str())];
+        sign_for_test(&mut ex, &pkcs8, "test-ephemeral", true);
         validate_package(&ex).unwrap();
-        assert_eq!(verify_package(&ex, false).unwrap().status, "trusted");
+        assert_eq!(verify_package_with_keys(&ex, false, &trusted).unwrap().status, "trusted");
         let init_res = invoke_source(store.clone(), ex.clone(), "init", json!({}), Some(5)).await.unwrap();
         assert_eq!(init_res["ok"], true);
         let h = invoke_source(store.clone(), ex.clone(), "home", json!({ "page": 1, "size": 10 }), Some(5)).await.unwrap();
