@@ -532,6 +532,85 @@ export function useAccountData(initialGuest: GuestData, saveGuest: (data: GuestD
     return () => { mounted.current = false; window.clearTimeout(flushTimer.current); window.clearTimeout(syncTimer.current);
       window.removeEventListener("focus", refresh); window.removeEventListener("online", onOnline); document.removeEventListener("visibilitychange", refresh); };
   }, []);
+  const mergePeerLibrary = useCallback((incoming: {
+    favs?: readonly number[];
+    postFavs?: readonly number[];
+    history?: readonly WatchProgress[];
+  }) => {
+    const s = state.current!;
+    const version = s.generation;
+    const cur = s.data;
+    const existingFavs = new Set(cur.favs);
+    const existingPostFavs = new Set(cur.postFavs);
+    const addedVideoFavs: number[] = [];
+    const addedPostFavs: number[] = [];
+    for (const id of incoming.favs ?? []) {
+      if (Number.isSafeInteger(id) && id > 0 && !existingFavs.has(id)) {
+        existingFavs.add(id);
+        addedVideoFavs.push(id);
+      }
+    }
+    for (const id of incoming.postFavs ?? []) {
+      if (Number.isSafeInteger(id) && id > 0 && !existingPostFavs.has(id)) {
+        existingPostFavs.add(id);
+        addedPostFavs.push(id);
+      }
+    }
+
+    const histMap = new Map(cur.history.map((row) => [row.id, row]));
+    const localOnly = new Set(cur.localHistory);
+    const dirtyHistory = { ...cur.dirtyHistory };
+    let updatedHistory = 0;
+    let dirtyAdded = 0;
+
+    for (const raw of incoming.history ?? []) {
+      if (!validProgress(raw)) continue;
+      const existing = histMap.get(raw.id);
+      if (!existing || raw.at > existing.at) {
+        histMap.set(raw.id, raw);
+        localOnly.add(raw.id);
+        updatedHistory++;
+        if (s.user && raw.t >= 3 && sentHistory.current.get(raw.id) !== raw.ep && dirtyHistory[raw.id]?.ep !== raw.ep && dirtyAdded < 20) {
+          dirtyHistory[raw.id] = { ep: raw.ep, at: raw.at };
+          dirtyAdded++;
+        }
+      }
+    }
+
+    if (!addedVideoFavs.length && !addedPostFavs.length && !updatedHistory) {
+      return { addedFavs: 0, addedPostFavs: 0, updatedHistory: 0 };
+    }
+
+    mutation.current++;
+    if (updatedHistory > 0) historyMutation.current++;
+    persist({
+      ...cur,
+      favs: [...addedVideoFavs, ...cur.favs],
+      postFavs: [...addedPostFavs, ...cur.postFavs],
+      history: [...histMap.values()].sort((a, b) => b.at - a.at),
+      dirtyHistory,
+      localHistory: [...localOnly],
+    });
+
+    if (s.user) {
+      if (dirtyAdded > 0) scheduleUpload(version);
+      if (addedVideoFavs.length || addedPostFavs.length) {
+        const auth = identity();
+        void (async () => {
+          for (const id of addedVideoFavs.slice(0, 30)) {
+            if (!isCurrent(version)) return;
+            await api.collect(id, true, auth).catch(() => {});
+          }
+          for (const id of addedPostFavs.slice(0, 30)) {
+            if (!isCurrent(version)) return;
+            await api.postCollect(id, true, auth).catch(() => {});
+          }
+        })();
+      }
+    }
+    return { addedFavs: addedVideoFavs.length, addedPostFavs: addedPostFavs.length, updatedHistory };
+  }, []);
+
   const s = state.current;
   const rev = snapshotRevision.current;
   return useMemo(() => ({
@@ -541,10 +620,10 @@ export function useAccountData(initialGuest: GuestData, saveGuest: (data: GuestD
     isFav: (id: number, kind: Kind = "video") => (kind === "video" ? s.data.favs : s.data.postFavs).includes(id),
     isLiked: (id: number, ep?: number, kind: Kind = "video") => kind === "post" ? s.data.postLikes.includes(id)
       : ep !== undefined && s.data.likeEpisodes ? s.data.likeEpisodes.some(row => row.video_id === id && row.ep === ep) : s.data.likes.includes(id),
-    setCollected, setLiked, setFollowing, addHistory, clearHistory, removeHistory,
+    setCollected, setLiked, setFollowing, addHistory, clearHistory, removeHistory, mergePeerLibrary,
     actionPending: (key: string) => pending.current.has(key),
     toggleLikeLocal: (id: number) => localToggle("likes", id),
     toggleFavLocal: (id: number) => localToggle("favs", id),
     toggleFollowLocal: (id: number) => localToggle("follows", id),
-  }), [rev, drawTick, setUser, restoreSession, generation, logout, syncAccount, seedFavoriteEpisodes, ackFavoriteEpisodes, setCollected, setLiked, setFollowing, addHistory, clearHistory, removeHistory, localToggle]);
+  }), [rev, drawTick, setUser, restoreSession, generation, logout, syncAccount, seedFavoriteEpisodes, ackFavoriteEpisodes, setCollected, setLiked, setFollowing, addHistory, clearHistory, removeHistory, mergePeerLibrary, localToggle]);
 }

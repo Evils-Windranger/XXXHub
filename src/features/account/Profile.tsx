@@ -643,7 +643,7 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
           </div>
         </div>
       </Modal>
-      <TvQrSyncModal open={scanOpen} onClose={() => setScanOpen(false)} />
+      <TvQrSyncModal open={scanOpen} initialView="scan" onClose={() => setScanOpen(false)} />
     </div>
   );
 }

@@ -301,6 +301,14 @@ pub fn run() {
             source::lan_push::source_lan_push_stop,
             source::lan_push::source_lan_push_status,
             source::lan_push::source_lan_push_to_tv,
+            source::lan_push::tv_peer_start,
+            source::lan_push::tv_peer_update_snapshot,
+            source::lan_push::tv_peer_discover,
+            source::lan_push::tv_peer_list,
+            source::lan_push::tv_peer_remove,
+            source::lan_push::tv_peer_pair_qr,
+            source::lan_push::tv_peer_pair_code,
+            source::lan_push::tv_peer_sync,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

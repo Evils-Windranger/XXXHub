@@ -1,12 +1,22 @@
-import { useEffect, useRef, useState } from "react";
-import { api, isMobile, type InstalledSourceSummary, type TvSyncData } from "../../shared/api/api";
-import { decodeQrFromFile, decodeQrFromVideo, parseTvLanTarget, type TvLanTarget } from "../../shared/lib/qrDecode";
-import { useContentPreferences } from "../../shared/model/contentPreferences";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import {
+  api,
+  isMobile,
+  platform,
+  type DiscoveredTv,
+  type PairedPeerSummary,
+  type TvBidirectionalSyncResult,
+  type TvSyncData,
+} from "../../shared/api/api";
+import { decodeQrFromFile, decodeQrFromVideo, parseTvLanTarget } from "../../shared/lib/qrDecode";
+import { useContentPreferences, mergeContentPreferences } from "../../shared/model/contentPreferences";
 import { useStore } from "../../shared/model/store";
 import { autoLineEnabled } from "../../shared/network/autoLine";
 import { tr } from "../../shared/i18n";
-import { IClose, IScan } from "../../shared/ui/icons";
+import { ICheck, IClose, IRefresh, IScan } from "../../shared/ui/icons";
 import { Button, Surface } from "../../shared/ui/ios/controls";
+import { Loader } from "../../shared/ui/ios/effects";
 import { Modal, Sheet } from "../../shared/ui/ui";
 
 function notifySourceChanged() {
@@ -14,39 +24,79 @@ function notifySourceChanged() {
   window.dispatchEvent(new CustomEvent("hg:source-changed"));
 }
 
+function defaultPhoneName() {
+  if (platform === "ios") return "iPhone";
+  if (platform === "android") return "Android 手机";
+  if (platform === "macos") return "Mac";
+  if (platform === "windows") return "Windows";
+  return "Linux";
+}
+
+function formatLastSync(ts?: number | null): string {
+  if (!ts) return "";
+  const diff = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  if (diff < 60) return tr("刚刚同步");
+  if (diff < 3600) return tr("{0} 分钟前", Math.floor(diff / 60));
+  if (diff < 86400) return tr("{0} 小时前", Math.floor(diff / 3600));
+  return tr("{0} 天前", Math.floor(diff / 86400));
+}
+
+type MergedTvItem = {
+  key: string;
+  name: string;
+  ip: string;
+  port: number;
+  online: boolean;
+  pairing: boolean;
+  pairId?: string | null;
+  lastSyncedAt?: number | null;
+};
+
+type SyncDoneBanner = {
+  title: string;
+  badges: string[];
+};
+
 export default function TvQrSyncModal({
   open,
   onClose,
   onSuccess,
+  initialView = "scan",
 }: {
   open: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  initialView?: "scan" | "hub";
 }) {
-  const { favs, postFavs, history, preferHevc, toast } = useStore();
+  const { favs, postFavs, history, preferHevc, mergePeerLibrary, toast } = useStore();
   const { preferences } = useContentPreferences();
 
-  const [tvTarget, setTvTarget] = useState<TvLanTarget | null>(null);
-  const [activeSource, setActiveSource] = useState<InstalledSourceSummary | null>(null);
-  const [syncSource, setSyncSource] = useState(true);
-  const [syncLibrary, setSyncLibrary] = useState(true);
-  const [syncPrefs, setSyncPrefs] = useState(true);
-  const [lineBase, setLineBase] = useState("");
+  const [view, setView] = useState<"scan" | "hub">(initialView);
+  const [pairedPeers, setPairedPeers] = useState<PairedPeerSummary[]>([]);
+  const [discovered, setDiscovered] = useState<DiscoveredTv[]>([]);
+  const [discovering, setDiscovering] = useState(false);
+
+  const [cameraState, setCameraState] = useState<"starting" | "ready" | "error">("starting");
   const [manualOpen, setManualOpen] = useState(false);
   const [manualText, setManualText] = useState("");
-  const [cameraState, setCameraState] = useState<"starting" | "ready" | "error">("starting");
-  const [scanPaused, setScanPaused] = useState(false);
-  const [scanKey, setScanKey] = useState(0);
-  const [busy, setBusy] = useState(false);
+  const [codeTarget, setCodeTarget] = useState<{ name: string; ip: string; port: number } | null>(null);
+  const [pinCode, setPinCode] = useState("");
+  const [status, setStatus] = useState<"idle" | "syncing" | "done" | "error">("idle");
+  const [doneBanner, setDoneBanner] = useState<SyncDoneBanner | null>(null);
   const [error, setError] = useState("");
+  const [busyPairId, setBusyPairId] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const decodingRef = useRef(false);
+  const lineBaseRef = useRef("");
+  const hasActiveSourceRef = useRef(true);
+  const autoCloseRef = useRef(0);
+  const busyRef = useRef(false);
 
-  const stopCamera = () => {
+  const stopCamera = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -54,66 +104,220 @@ export default function TvQrSyncModal({
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-  };
+  }, []);
+
+  const refreshDevices = useCallback(async () => {
+    setDiscovering(true);
+    try {
+      const [peers, found] = await Promise.all([
+        api.tvPeerList().catch(() => [] as PairedPeerSummary[]),
+        api.tvPeerDiscover().catch(() => [] as DiscoveredTv[]),
+      ]);
+      setPairedPeers(peers);
+      setDiscovered(found);
+    } finally {
+      setDiscovering(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!open) {
+      window.clearTimeout(autoCloseRef.current);
       stopCamera();
-      setTvTarget(null);
       setManualOpen(false);
-      setScanPaused(false);
       setManualText("");
+      setCodeTarget(null);
+      setPinCode("");
+      setStatus("idle");
+      setDoneBanner(null);
       setError("");
-      setBusy(false);
+      setBusyPairId(null);
+      busyRef.current = false;
       return;
     }
+    setView(initialView);
+    void refreshDevices();
     void api.sourceState().then((s) => {
-      const act = s.sources.find((x) => x.active) ?? null;
-      setActiveSource(act);
-      setSyncSource(Boolean(act));
+      hasActiveSourceRef.current = s.sources.some((x) => x.active);
+    }).catch(() => {});
+    void api.lineState().then((l) => {
+      lineBaseRef.current = l.base || "";
     }).catch(() => {
-      setActiveSource(null);
-      setSyncSource(false);
+      lineBaseRef.current = "";
     });
-    void api.lineState().then((l) => setLineBase(l.base || "")).catch(() => setLineBase(""));
-  }, [open]);
+  }, [open, initialView, refreshDevices, stopCamera]);
 
-  const handleDecodedRaw = async (rawText: string) => {
-    const raw = rawText.trim();
-    if (!raw || busy) return;
-    setError("");
-    const parsed = parseTvLanTarget(raw);
-    if (parsed) {
-      stopCamera();
-      setManualOpen(false);
-      setTvTarget(parsed);
-      return;
+  const buildSyncPayload = useCallback((): TvSyncData => ({
+    favs,
+    postFavs,
+    history: history.map((h) => ({ id: h.id, ep: h.ep, t: h.t, dur: h.dur, at: h.at })),
+    contentPreferences: {
+      blockedTags: preferences.blockedTags,
+      pinnedTags: preferences.pinnedTags,
+      paused: preferences.paused,
+      hideUntagged: preferences.hideUntagged,
+    },
+    preferHevc,
+    autoLine: autoLineEnabled(),
+    lineBase: lineBaseRef.current || null,
+  }), [favs, postFavs, history, preferences, preferHevc]);
+
+  const finishBidirectionalSync = useCallback((res: TvBidirectionalSyncResult, autoClose: boolean) => {
+    const merged = mergePeerLibrary({
+      favs: res.tvSync.favs,
+      postFavs: res.tvSync.postFavs,
+      history: res.tvSync.history,
+    });
+    if (res.tvSync.contentPreferences) {
+      mergeContentPreferences(res.tvSync.contentPreferences);
     }
-    setBusy(true);
-    stopCamera();
-    try {
-      const summary = await api.sourceImport(raw, true);
+    if (res.importedSourceFromTv) {
       notifySourceChanged();
-      toast(tr("已导入 {0} v{1}", summary.name, summary.version), "ok");
-      onSuccess?.();
-      onClose();
+    }
+
+    const pushed = res.pushedFavs + res.pushedPostFavs + res.pushedHistory;
+    const pulled = merged.addedFavs + merged.addedPostFavs + merged.updatedHistory;
+    const badges: string[] = [];
+    if (res.importedSourceFromTv) badges.push(res.importedSourceFromTv.name);
+    else if (res.sourceName) badges.push(res.sourceName);
+    if (pushed > 0) badges.push(tr("↑ 推 {0} 项", pushed));
+    if (pulled > 0) badges.push(tr("↓ 取 {0} 项", pulled));
+
+    const title = res.legacySourceOnly
+      ? tr("已配置视频源，旧版电视暂不支持同步其他数据")
+      : tr("已与 {0} 同步", res.tvName);
+    setDoneBanner({ title, badges });
+    setStatus("done");
+    toast(badges.length ? `${title} · ${badges.join(" · ")}` : title, res.legacySourceOnly ? "info" : "ok");
+    onSuccess?.();
+    void refreshDevices();
+
+    if (autoClose) {
+      window.clearTimeout(autoCloseRef.current);
+      autoCloseRef.current = window.setTimeout(() => onClose(), 1050);
+    }
+  }, [mergePeerLibrary, toast, onSuccess, refreshDevices, onClose]);
+
+  const handleDecodedRaw = useCallback(async (rawText: string) => {
+    const raw = rawText.trim();
+    if (!raw || busyRef.current) return;
+    busyRef.current = true;
+    stopCamera();
+    setManualOpen(false);
+    setCodeTarget(null);
+    setError("");
+    setStatus("syncing");
+
+    try {
+      const target = parseTvLanTarget(raw);
+      if (target) {
+        const res = await api.tvPeerPairQr(
+          target.url,
+          defaultPhoneName(),
+          hasActiveSourceRef.current,
+          buildSyncPayload(),
+        );
+        finishBidirectionalSync(res, true);
+      } else {
+        const summary = await api.sourceImport(raw, true);
+        notifySourceChanged();
+        setDoneBanner({ title: tr("已导入 {0} v{1}", summary.name, summary.version), badges: [] });
+        setStatus("done");
+        toast(tr("已导入 {0} v{1}", summary.name, summary.version), "ok");
+        onSuccess?.();
+        window.clearTimeout(autoCloseRef.current);
+        autoCloseRef.current = window.setTimeout(() => onClose(), 900);
+      }
     } catch (e) {
+      setStatus("error");
       setError(e instanceof Error ? e.message : String(e || tr("失败")));
-      setScanPaused(true);
     } finally {
-      setBusy(false);
+      busyRef.current = false;
+    }
+  }, [stopCamera, buildSyncPayload, finishBidirectionalSync, toast, onSuccess, onClose]);
+
+  const syncWithPairedTv = useCallback(async (tv: MergedTvItem) => {
+    if (!tv.pairId || busyRef.current) return;
+    busyRef.current = true;
+    setBusyPairId(tv.pairId);
+    setError("");
+    if (view === "scan") {
+      stopCamera();
+      setStatus("syncing");
+    }
+    try {
+      const res = await api.tvPeerSync(
+        tv.pairId,
+        tv.online ? tv.ip : null,
+        tv.online ? tv.port : null,
+        hasActiveSourceRef.current,
+        buildSyncPayload(),
+      );
+      finishBidirectionalSync(res, view === "scan");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e || tr("失败"));
+      setError(msg);
+      if (view === "scan") setStatus("error");
+      else toast(msg, "info");
+      void refreshDevices();
+    } finally {
+      setBusyPairId(null);
+      busyRef.current = false;
+    }
+  }, [view, stopCamera, buildSyncPayload, finishBidirectionalSync, toast, refreshDevices]);
+
+  const submitPinPair = useCallback(async () => {
+    if (!codeTarget || pinCode.trim().length !== 4 || busyRef.current) return;
+    busyRef.current = true;
+    setError("");
+    if (view === "scan") {
+      stopCamera();
+      setStatus("syncing");
+    }
+    try {
+      const res = await api.tvPeerPairCode(
+        codeTarget.ip,
+        codeTarget.port,
+        pinCode.trim(),
+        defaultPhoneName(),
+        hasActiveSourceRef.current,
+        buildSyncPayload(),
+      );
+      setCodeTarget(null);
+      setPinCode("");
+      finishBidirectionalSync(res, view === "scan");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e || tr("失败"));
+      setError(msg);
+      if (view === "scan") setStatus("idle");
+    } finally {
+      busyRef.current = false;
+    }
+  }, [codeTarget, pinCode, view, stopCamera, buildSyncPayload, finishBidirectionalSync]);
+
+  const removePairedTv = async (pairId: string) => {
+    if (busyRef.current) return;
+    setBusyPairId(pairId);
+    try {
+      const next = await api.tvPeerRemove(pairId);
+      setPairedPeers(next);
+      toast(tr("已解除配对"), "info");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), "info");
+    } finally {
+      setBusyPairId(null);
     }
   };
 
+  // Camera viewfinder loop when in full-screen "scan" mode and idle
   useEffect(() => {
-    if (!open || tvTarget || manualOpen || scanPaused) {
+    if (!open || view !== "scan" || manualOpen || codeTarget || status !== "idle") {
       stopCamera();
       return;
     }
     let alive = true;
     let timer = 0;
     setCameraState("starting");
-    setError("");
 
     const start = async () => {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -166,243 +370,406 @@ export default function TvQrSyncModal({
       window.clearTimeout(timer);
       stopCamera();
     };
-  }, [open, tvTarget, manualOpen, scanPaused, scanKey]);
+  }, [open, view, manualOpen, codeTarget, status, handleDecodedRaw, stopCamera]);
 
   const onFilePick = async (file: File | undefined) => {
     if (!file) return;
     setError("");
-    setBusy(true);
     try {
       const val = await decodeQrFromFile(file);
       if (!val) {
-        setError(tr("未在图片中识别到二维码"));
+        toast(tr("未在图片中识别到二维码"), "info");
         return;
       }
-      setBusy(false);
       await handleDecodedRaw(val);
     } catch {
-      setError(tr("未在图片中识别到二维码"));
+      toast(tr("未在图片中识别到二维码"), "info");
     } finally {
-      setBusy(false);
       if (fileRef.current) fileRef.current.value = "";
     }
   };
 
-  const confirmSyncToTv = async () => {
-    if (!tvTarget || busy) return;
-    const includeSource = syncSource && Boolean(activeSource);
-    if (!includeSource && !syncLibrary && !syncPrefs) {
-      setError(tr("请至少选择一项要同步的内容"));
-      return;
+  const mergedTvs = useMemo<MergedTvItem[]>(() => {
+    const out: MergedTvItem[] = [];
+    const matchedPairIds = new Set<string>();
+    for (const d of discovered) {
+      if (d.pairId) matchedPairIds.add(d.pairId);
+      out.push({
+        key: `disc:${d.deviceId}`,
+        name: d.name,
+        ip: d.ip,
+        port: d.port,
+        online: true,
+        pairing: d.pairing,
+        pairId: d.pairId,
+        lastSyncedAt: d.lastSyncedAt,
+      });
     }
-    setBusy(true);
-    setError("");
-    try {
-      const sync: TvSyncData = {
-        favs: syncLibrary ? favs : [],
-        postFavs: syncLibrary ? postFavs : [],
-        history: syncLibrary ? history.map((h) => ({ id: h.id, ep: h.ep, t: h.t, dur: h.dur, at: h.at })) : [],
-        contentPreferences: syncPrefs
-          ? {
-              blockedTags: preferences.blockedTags,
-              pinnedTags: preferences.pinnedTags,
-              paused: preferences.paused,
-              hideUntagged: preferences.hideUntagged,
-            }
-          : null,
-        preferHevc: syncPrefs ? preferHevc : null,
-        autoLine: syncPrefs ? autoLineEnabled() : null,
-        lineBase: syncPrefs && lineBase ? lineBase : null,
-      };
-      const res = await api.sourceLanPushToTv(tvTarget.url, includeSource, syncLibrary || syncPrefs ? sync : null);
-      if (res.legacySourceOnly) {
-        toast(tr("已配置视频源，旧版电视暂不支持同步其他数据"), "info");
-      } else {
-        const parts: string[] = [];
-        if (res.sourceName) parts.push(res.sourceName);
-        if (res.syncedFavs + res.syncedPostFavs > 0) parts.push(tr("{0} 项收藏", res.syncedFavs + res.syncedPostFavs));
-        if (res.syncedHistory > 0) parts.push(tr("{0} 条记录", res.syncedHistory));
-        toast(parts.length ? tr("已同步：{0}", parts.join(" · ")) : tr("已完成电视配置与同步"), "ok");
-      }
-      onSuccess?.();
-      onClose();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e || tr("失败")));
-    } finally {
-      setBusy(false);
+    for (const p of pairedPeers) {
+      if (matchedPairIds.has(p.pairId)) continue;
+      out.push({
+        key: `pair:${p.pairId}`,
+        name: p.name,
+        ip: p.lastIp,
+        port: p.lastPort,
+        online: false,
+        pairing: false,
+        pairId: p.pairId,
+        lastSyncedAt: p.lastSyncedAt,
+      });
     }
-  };
+    return out;
+  }, [discovered, pairedPeers]);
 
-  const libCount = favs.length + postFavs.length;
-  const tagCount = preferences.blockedTags.length + preferences.pinnedTags.length;
+  const fileInput = (
+    <input
+      ref={fileRef}
+      type="file"
+      accept="image/*"
+      className="hidden"
+      onChange={(e) => void onFilePick(e.target.files?.[0])}
+    />
+  );
 
-  const body = (
+  if (!open) return null;
+
+  if (view === "scan") {
+    const scanOverlay = (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={tr("扫一扫")}
+        className="fixed inset-0 z-[240] bg-black text-white flex flex-col select-none"
+      >
+        {fileInput}
+        <video
+          ref={videoRef}
+          playsInline
+          muted
+          autoPlay
+          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-200 ${cameraState === "ready" && status === "idle" && !manualOpen && !codeTarget ? "opacity-100" : "opacity-25"}`}
+        />
+
+        {/* Top bar */}
+        <div
+          className="relative z-10 flex items-center justify-between gap-3 px-4 pb-3"
+          style={{ paddingTop: "max(14px, var(--native-sat, env(safe-area-inset-top, 0px)))" }}
+        >
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={tr("关闭")}
+            className="w-10 h-10 rounded-full bg-black/50 backdrop-blur-md border border-white/15 flex items-center justify-center text-white pressable"
+          >
+            <IClose size={19} />
+          </button>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="h-9 px-3.5 rounded-full bg-black/50 backdrop-blur-md border border-white/15 text-[13px] font-medium text-white pressable"
+            >
+              {tr("相册")}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setError(""); setCodeTarget(null); setManualOpen((v) => !v); }}
+              className="h-9 px-3.5 rounded-full bg-black/50 backdrop-blur-md border border-white/15 text-[13px] font-medium text-white pressable"
+            >
+              {tr("手动")}
+            </button>
+          </div>
+        </div>
+
+        {/* Center viewport */}
+        <div className="relative z-10 flex-1 flex items-center justify-center px-6">
+          {status === "syncing" && (
+            <div className="w-full max-w-[300px] rounded-2xl bg-black/75 backdrop-blur-xl border border-white/15 p-6 flex flex-col items-center gap-3 text-center">
+              <Loader />
+              <div className="text-[14px] font-medium text-white">{tr("正在连接并同步…")}</div>
+            </div>
+          )}
+
+          {status === "done" && doneBanner && (
+            <div className="w-full max-w-[320px] rounded-2xl bg-black/80 backdrop-blur-xl border border-mint/40 p-6 flex flex-col items-center gap-3 text-center">
+              <div className="w-11 h-11 rounded-full bg-mint/20 border border-mint/50 flex items-center justify-center text-mint">
+                <ICheck size={22} />
+              </div>
+              <div className="text-[15px] font-bold text-white">{doneBanner.title}</div>
+              {doneBanner.badges.length > 0 && (
+                <div className="flex flex-wrap items-center justify-center gap-1.5">
+                  {doneBanner.badges.map((b, i) => (
+                    <span key={i} className="text-[12px] px-2.5 py-0.5 rounded-full bg-white/10 text-white/90">{b}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {status === "error" && (
+            <div className="w-full max-w-[320px] rounded-2xl bg-black/80 backdrop-blur-xl border border-danger/40 p-5 flex flex-col items-center gap-3 text-center">
+              <p role="alert" className="text-[13px] text-danger break-words">{error}</p>
+              <button
+                type="button"
+                onClick={() => { setError(""); setStatus("idle"); }}
+                className="h-9 px-5 rounded-full brand-grad text-[13px] font-semibold text-on-primary pressable"
+              >
+                {tr("重试")}
+              </button>
+            </div>
+          )}
+
+          {status === "idle" && manualOpen && (
+            <div className="w-full max-w-[340px] rounded-2xl bg-black/80 backdrop-blur-xl border border-white/15 p-4 space-y-3">
+              <input
+                value={manualText}
+                onChange={(e) => setManualText(e.target.value)}
+                placeholder={tr("电视二维码链接 / 视频源链接 / npm:包名")}
+                className="w-full h-10 px-3 rounded-xl bg-white/10 text-[13px] text-white font-mono outline-none placeholder:text-white/45"
+                autoFocus
+              />
+              {error && <p role="alert" className="text-[12px] text-danger break-words">{error}</p>}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setError(""); setManualOpen(false); }}
+                  className="h-9 px-4 rounded-xl bg-white/10 text-[13px] text-white pressable"
+                >
+                  {tr("取消")}
+                </button>
+                <button
+                  type="button"
+                  disabled={!manualText.trim()}
+                  onClick={() => void handleDecodedRaw(manualText)}
+                  className="flex-1 h-9 rounded-xl brand-grad text-[13px] font-semibold text-on-primary pressable disabled:opacity-50"
+                >
+                  {tr("确认")}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {status === "idle" && !manualOpen && codeTarget && (
+            <div className="w-full max-w-[320px] rounded-2xl bg-black/80 backdrop-blur-xl border border-white/15 p-5 space-y-3 text-center">
+              <div className="text-[15px] font-bold text-white">{codeTarget.name}</div>
+              <input
+                inputMode="numeric"
+                maxLength={4}
+                value={pinCode}
+                onChange={(e) => setPinCode(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                placeholder={tr("输入电视上的 4 位配对码")}
+                className="w-full h-11 px-3 rounded-xl bg-white/10 text-center text-[20px] font-mono tracking-[0.35em] text-white outline-none placeholder:text-[13px] placeholder:tracking-normal placeholder:text-white/45"
+                autoFocus
+              />
+              {error && <p role="alert" className="text-[12px] text-danger break-words">{error}</p>}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setError(""); setPinCode(""); setCodeTarget(null); }}
+                  className="h-9 px-4 rounded-xl bg-white/10 text-[13px] text-white pressable"
+                >
+                  {tr("取消")}
+                </button>
+                <button
+                  type="button"
+                  disabled={pinCode.length !== 4}
+                  onClick={() => void submitPinPair()}
+                  className="flex-1 h-9 rounded-xl brand-grad text-[13px] font-semibold text-on-primary pressable disabled:opacity-50"
+                >
+                  {tr("配对并同步")}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {status === "idle" && !manualOpen && !codeTarget && (
+            cameraState === "error" ? (
+              <div className="w-full max-w-[300px] rounded-2xl bg-white/5 border border-white/10 p-5 text-center space-y-2">
+                <IScan size={28} className="mx-auto text-primary/80" />
+                <p className="text-[13px] text-white/75">{tr("相机未就绪，可直接点击下方电视或从相册识别")}</p>
+              </div>
+            ) : (
+              <div className="relative w-[248px] h-[248px] max-w-[70vw] max-h-[70vw]">
+                <span aria-hidden className="absolute left-0 top-0 w-7 h-7 border-t-[3px] border-l-[3px] border-primary rounded-tl-xl" />
+                <span aria-hidden className="absolute right-0 top-0 w-7 h-7 border-t-[3px] border-r-[3px] border-primary rounded-tr-xl" />
+                <span aria-hidden className="absolute left-0 bottom-0 w-7 h-7 border-b-[3px] border-l-[3px] border-primary rounded-bl-xl" />
+                <span aria-hidden className="absolute right-0 bottom-0 w-7 h-7 border-b-[3px] border-r-[3px] border-primary rounded-br-xl" />
+                <span aria-hidden className="absolute inset-x-4 top-1/2 h-[2px] bg-gradient-to-r from-transparent via-primary to-transparent opacity-80" />
+              </div>
+            )
+          )}
+        </div>
+
+        {/* Bottom LAN discovery tray */}
+        <div
+          className="relative z-10 mx-auto w-full max-w-[480px] px-4 pt-2"
+          style={{ paddingBottom: "max(16px, var(--native-sab, env(safe-area-inset-bottom, 0px)))" }}
+        >
+          <div className="rounded-2xl bg-black/70 backdrop-blur-xl border border-white/12 p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[12px] font-semibold text-white/80">{tr("同局域网电视")}</span>
+              <button
+                type="button"
+                disabled={discovering}
+                onClick={() => void refreshDevices()}
+                aria-label={tr("刷新")}
+                className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white/85 pressable disabled:opacity-50"
+              >
+                <IRefresh size={13} className={discovering ? "animate-spin" : ""} />
+              </button>
+            </div>
+
+            {mergedTvs.length === 0 ? (
+              <div className="text-[12px] text-white/55 py-1">
+                {discovering ? tr("正在搜索同 Wi-Fi 电视…") : tr("暂未发现可配对电视，请对准电视二维码")}
+              </div>
+            ) : (
+              <div className="space-y-1.5 max-h-[144px] overflow-y-auto">
+                {mergedTvs.map((tv) => (
+                  <div key={tv.key} className="flex items-center justify-between gap-2 rounded-xl bg-white/8 px-3 py-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 text-[13px] font-semibold text-white truncate">
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${tv.online ? "bg-mint" : "bg-white/30"}`} />
+                        <span className="truncate">{tv.name}</span>
+                      </div>
+                      <div className="text-[11px] text-white/55 truncate">
+                        {tv.ip}{tv.lastSyncedAt ? ` · ${formatLastSync(tv.lastSyncedAt)}` : ""}
+                      </div>
+                    </div>
+
+                    {tv.pairId ? (
+                      <button
+                        type="button"
+                        disabled={Boolean(busyPairId)}
+                        onClick={() => void syncWithPairedTv(tv)}
+                        className="shrink-0 h-8 px-3.5 rounded-full brand-grad text-[12px] font-semibold text-on-primary pressable disabled:opacity-50"
+                      >
+                        {busyPairId === tv.pairId ? tr("同步中") : tr("双向同步")}
+                      </button>
+                    ) : tv.pairing ? (
+                      <button
+                        type="button"
+                        onClick={() => { setError(""); setPinCode(""); setCodeTarget({ name: tv.name, ip: tv.ip, port: tv.port }); }}
+                        className="shrink-0 h-8 px-3.5 rounded-full bg-white/15 border border-white/20 text-[12px] font-semibold text-white pressable"
+                      >
+                        {tr("配对")}
+                      </button>
+                    ) : (
+                      <span className="shrink-0 text-[11px] text-white/50">{tr("请在 TV 打开扫码页")}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+    return typeof document !== "undefined" ? createPortal(scanOverlay, document.body) : scanOverlay;
+  }
+
+  // "hub" view: Paired & discovered TVs inside Settings Sheet/Modal
+  const hubBody = (
     <div className="flex flex-col min-h-0 max-h-[82dvh]">
+      {fileInput}
       <div className="shrink-0 flex items-center justify-between gap-2 px-4 py-3.5 border-b border-s3">
         <div className="flex items-center gap-2 min-w-0">
           <IScan size={16} className="text-primary shrink-0" />
-          <h2 className="text-[16px] font-bold text-on truncate">{tvTarget ? tr("同步到电视") : tr("扫一扫")}</h2>
+          <h2 className="text-[16px] font-bold text-on truncate">{tr("连接 TV")}</h2>
         </div>
-        <Button onClick={onClose} aria-label={tr("关闭")} className="ios-icon-button"><IClose size={18} /></Button>
+        <div className="flex items-center gap-1.5">
+          <Button onClick={() => void refreshDevices()} aria-label={tr("刷新")} className="ios-icon-button">
+            <IRefresh size={16} className={discovering ? "animate-spin" : ""} />
+          </Button>
+          <Button onClick={onClose} aria-label={tr("关闭")} className="ios-icon-button"><IClose size={18} /></Button>
+        </div>
       </div>
 
-      <div className="flex-1 min-h-0 scroll-y p-4 space-y-3.5">
-        {tvTarget ? (
-          <>
-            <Surface className="rounded-(--r-md) bg-s2 px-3.5 py-2.5 flex items-center justify-between gap-2">
-              <span className="text-[12px] text-mut">{tr("目标电视")}</span>
-              <code className="text-[12px] font-mono text-on">{tvTarget.ip}:{tvTarget.port}</code>
-            </Surface>
-
-            <Surface className="rounded-(--r-md) bg-s2 divide-y divide-s3">
-              <label className="flex items-center justify-between gap-3 p-3.5 cursor-pointer">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <input
-                    type="checkbox"
-                    checked={syncSource && Boolean(activeSource)}
-                    disabled={!activeSource || busy}
-                    onChange={(e) => setSyncSource(e.target.checked)}
-                    className="w-4 h-4 accent-primary shrink-0"
-                  />
-                  <span className="text-[14px] text-on">{tr("当前视频源")}</span>
-                </div>
-                <span className="text-[12px] text-mut truncate max-w-[48%]">
-                  {activeSource ? `${activeSource.name} v${activeSource.version}` : tr("未设置")}
-                </span>
-              </label>
-
-              <label className="flex items-center justify-between gap-3 p-3.5 cursor-pointer">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <input
-                    type="checkbox"
-                    checked={syncLibrary}
-                    disabled={busy}
-                    onChange={(e) => setSyncLibrary(e.target.checked)}
-                    className="w-4 h-4 accent-primary shrink-0"
-                  />
-                  <span className="text-[14px] text-on">{tr("收藏与观看记录")}</span>
-                </div>
-                <span className="text-[12px] text-mut whitespace-nowrap">
-                  {tr("{0} 部收藏 · {1} 条记录", libCount, history.length)}
-                </span>
-              </label>
-
-              <label className="flex items-center justify-between gap-3 p-3.5 cursor-pointer">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <input
-                    type="checkbox"
-                    checked={syncPrefs}
-                    disabled={busy}
-                    onChange={(e) => setSyncPrefs(e.target.checked)}
-                    className="w-4 h-4 accent-primary shrink-0"
-                  />
-                  <span className="text-[14px] text-on">{tr("标签偏好与播放设置")}</span>
-                </div>
-                <span className="text-[12px] text-mut whitespace-nowrap">
-                  {tr("{0} 个标签 · 清晰度与线路", tagCount)}
-                </span>
-              </label>
-            </Surface>
-
-            {error && <p role="alert" className="text-[12px] text-danger break-words">{error}</p>}
-
-            <div className="flex items-center gap-2.5 pt-1">
-              <Button
-                disabled={busy}
-                onClick={() => { setError(""); setTvTarget(null); }}
-                className="h-10 px-4 rounded-(--r-ctl) bg-s3 text-[13px] font-medium text-on pressable"
-              >
-                {tr("重新扫码")}
-              </Button>
-              <Button
-                disabled={busy || (!syncSource && !syncLibrary && !syncPrefs)}
-                onClick={() => void confirmSyncToTv()}
-                className="flex-1 h-10 rounded-(--r-ctl) brand-grad text-[14px] font-semibold text-on-primary pressable disabled:opacity-50"
-              >
-                {busy ? tr("同步中…") : tr("配置并同步到 TV")}
-              </Button>
-            </div>
-          </>
-        ) : manualOpen ? (
-          <Surface className="rounded-(--r-md) bg-s2 p-3.5 space-y-3">
+      <div className="flex-1 min-h-0 scroll-y p-4 space-y-3">
+        {codeTarget && (
+          <Surface className="rounded-(--r-md) bg-s2 p-3.5 space-y-2.5">
+            <div className="text-[13px] font-semibold text-on">{tr("输入 {0} 上的 4 位配对码", codeTarget.name)}</div>
             <input
-              value={manualText}
-              onChange={(e) => setManualText(e.target.value)}
-              placeholder={tr("电视二维码链接 / 视频源链接 / npm:包名")}
-              className="w-full h-10 px-3 rounded-(--r-sm) bg-s3 text-[13px] text-on font-mono outline-none"
+              inputMode="numeric"
+              maxLength={4}
+              value={pinCode}
+              onChange={(e) => setPinCode(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              placeholder="0000"
+              className="w-full h-10 px-3 rounded-(--r-sm) bg-s3 text-center text-[18px] font-mono tracking-[0.35em] text-on outline-none"
               autoFocus
             />
             {error && <p role="alert" className="text-[12px] text-danger break-words">{error}</p>}
             <div className="flex items-center gap-2">
-              <Button
-                disabled={busy}
-                onClick={() => { setError(""); setManualOpen(false); }}
-                className="h-9 px-3.5 rounded-(--r-ctl) bg-s3 text-[13px] text-on pressable"
-              >
-                {tr("返回扫码")}
-              </Button>
-              <Button
-                disabled={busy || !manualText.trim()}
-                onClick={() => void handleDecodedRaw(manualText)}
-                className="flex-1 h-9 rounded-(--r-ctl) brand-grad text-[13px] font-semibold text-on-primary pressable disabled:opacity-50"
-              >
-                {busy ? tr("导入中…") : tr("确认")}
-              </Button>
+              <Button onClick={() => { setCodeTarget(null); setPinCode(""); setError(""); }} className="h-9 px-3.5 rounded-(--r-ctl) bg-s3 text-[13px] text-on pressable">{tr("取消")}</Button>
+              <Button disabled={pinCode.length !== 4 || Boolean(busyPairId)} onClick={() => void submitPinPair()} className="flex-1 h-9 rounded-(--r-ctl) brand-grad text-[13px] font-semibold text-on-primary pressable disabled:opacity-50">{tr("配对并同步")}</Button>
             </div>
           </Surface>
-        ) : (
-          <>
-            <div className="relative mx-auto w-full max-w-[290px] aspect-square rounded-(--r-md) overflow-hidden bg-black/80 ring-1 ring-s4 flex items-center justify-center">
-              <video ref={videoRef} playsInline muted autoPlay className="w-full h-full object-cover" />
-              <div aria-hidden className="pointer-events-none absolute inset-6 border-2 border-primary/70 rounded-xl" />
-              {cameraState !== "ready" && (
-                <div className="absolute inset-0 flex items-center justify-center p-4 text-center bg-s1/90 text-[13px] text-mut">
-                  {cameraState === "starting" ? tr("正在启动相机…") : tr("相机不可用，请从相册选图或手动输入")}
-                </div>
-              )}
-            </div>
-
-            {error && <p role="alert" className="text-[12px] text-danger text-center break-words">{error}</p>}
-
-            <div className="flex items-center justify-center gap-2.5">
-              {scanPaused && (
-                <Button
-                  disabled={busy}
-                  onClick={() => { setError(""); setScanPaused(false); setScanKey((k) => k + 1); }}
-                  className="flex-1 h-9 rounded-(--r-ctl) brand-grad text-[13px] font-semibold text-on-primary pressable"
-                >
-                  {tr("重新扫码")}
-                </Button>
-              )}
-              <Button
-                disabled={busy}
-                onClick={() => fileRef.current?.click()}
-                className="flex-1 h-9 rounded-(--r-ctl) bg-s3 text-[13px] font-medium text-on pressable"
-              >
-                {tr("相册识别")}
-              </Button>
-              <Button
-                disabled={busy}
-                onClick={() => { setError(""); setManualOpen(true); }}
-                className="flex-1 h-9 rounded-(--r-ctl) bg-s3 text-[13px] font-medium text-on pressable"
-              >
-                {tr("手动输入")}
-              </Button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => void onFilePick(e.target.files?.[0])}
-              />
-            </div>
-          </>
         )}
+
+        {!mergedTvs.length ? (
+          <Surface className="rounded-(--r-md) bg-s2 p-5 text-center text-[13px] text-mut">
+            {discovering ? tr("正在搜索同 Wi-Fi 电视…") : tr("暂未发现可配对电视")}
+          </Surface>
+        ) : (
+          <div className="space-y-2">
+            {mergedTvs.map((tv) => (
+              <Surface key={tv.key} className="rounded-(--r-md) bg-s2 p-3.5 flex items-center justify-between gap-2.5">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-[14px] font-semibold text-on truncate">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${tv.online ? "bg-mint" : "bg-dim"}`} />
+                    <span className="truncate">{tv.name}</span>
+                  </div>
+                  <div className="text-[12px] text-mut truncate">
+                    {tv.ip}{tv.lastSyncedAt ? ` · ${formatLastSync(tv.lastSyncedAt)}` : ""}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {tv.pairId ? (
+                    <>
+                      <Button
+                        disabled={Boolean(busyPairId)}
+                        onClick={() => void syncWithPairedTv(tv)}
+                        className="h-8 px-3 rounded-(--r-ctl) brand-grad text-[12px] font-semibold text-on-primary pressable disabled:opacity-50"
+                      >
+                        {busyPairId === tv.pairId ? tr("同步中") : tr("双向同步")}
+                      </Button>
+                      <Button
+                        disabled={Boolean(busyPairId)}
+                        onClick={() => void removePairedTv(tv.pairId!)}
+                        className="h-8 px-2.5 rounded-(--r-ctl) bg-s3 text-[12px] text-danger pressable"
+                      >
+                        {tr("解除")}
+                      </Button>
+                    </>
+                  ) : tv.pairing ? (
+                    <Button
+                      onClick={() => { setError(""); setPinCode(""); setCodeTarget({ name: tv.name, ip: tv.ip, port: tv.port }); }}
+                      className="h-8 px-3 rounded-(--r-ctl) bg-primary text-[12px] font-semibold text-on-primary pressable"
+                    >
+                      {tr("配对")}
+                    </Button>
+                  ) : (
+                    <span className="text-[12px] text-mut">{tr("未开启配对")}</span>
+                  )}
+                </div>
+              </Surface>
+            ))}
+          </div>
+        )}
+
+        <Button
+          onClick={() => { setError(""); setCodeTarget(null); setView("scan"); }}
+          className="w-full h-10 rounded-(--r-ctl) brand-grad text-[14px] font-semibold text-on-primary pressable inline-flex items-center justify-center gap-1.5"
+        >
+          <IScan size={15} /> {tr("扫码添加或同步")}
+        </Button>
       </div>
     </div>
   );
 
   return isMobile
-    ? <Sheet open={open} onClose={onClose} label={tvTarget ? tr("同步到电视") : tr("扫一扫")}>{body}</Sheet>
-    : <Modal open={open} onClose={onClose} label={tvTarget ? tr("同步到电视") : tr("扫一扫")} width={460}>{body}</Modal>;
+    ? <Sheet open={open} onClose={onClose} label={tr("连接 TV")}>{hubBody}</Sheet>
+    : <Modal open={open} onClose={onClose} label={tr("连接 TV")} width={460}>{hubBody}</Modal>;
 }

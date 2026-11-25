@@ -66,8 +66,8 @@ export default function TvApp(){
     <main className="tv-main-area" hidden={!!current}>
       {needsSource&&tab!=="settings"?(
         <div className="tv-page-scroll tv-source-empty" data-tv-scroll-id="page-source-empty">
-          <div className="tv-source-empty-card">
-            <h1>导入视频源</h1>
+          <div className="tv-connect-hero">
+            <h1 className="tv-connect-hero-head">导入视频源</h1>
             <TvLanPushPanel onImported={()=>{void api.sourceState().then(setSourceState).catch(()=>{});}} />
           </div>
         </div>
@@ -78,6 +78,7 @@ export default function TvApp(){
     {current?.kind==="detail"&&<div className="tv-detail-route" data-tv-scroll-id={page}><DetailPage key={contentKey(current.content)} content={current.content} sourceKey={tv.sourceKey} progress={entry?.progress} favorite={!!entry?.favorite} onFavorite={tv.toggleFavorite} onBack={back} onMetadata={metadata} onPlay={(content,part,seconds=0)=>{rememberFocus(page);setStack(s=>[...s,{kind:"player",content,part,seconds}]);}}/></div>}
     {current?.kind==="player"&&<PlayerPage key={contentKey(current.content)} content={current.content} sourceKey={tv.sourceKey} part={current.part} resumeSeconds={current.seconds} favorite={!!entry?.favorite} rate={playback.rate} quality={playback.quality} autoNext={playback.autoplayNext} onPreferencesChange={setPlaybackPreferences} onFavorite={tv.toggleFavorite} onProgress={tv.progress} onMetadata={metadata} onBack={back}/>}
     {(tv.error||prefs.storageError)&&<div className="tv-notice" role="alert">{tv.error||prefs.storageError}</div>}
+    {tv.syncNotice&&<div className="tv-sync-toast" role="status">{tv.syncNotice}</div>}
     {deepLink&&<TvModal id="tv-deep-link" title="导入视频源" onClose={()=>{if(!deepBusy){setDeepErr("");clearDeepLink();}}}>
       <code style={{display:"block",wordBreak:"break-all",marginBottom:14,opacity:.85}}>{deepLink}</code>
       {deepErr&&<p role="alert" style={{color:"#f87171",marginBottom:10}}>{deepErr}</p>}

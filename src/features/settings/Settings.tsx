@@ -35,6 +35,7 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
   const [lineOpen, setLineOpen] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
+  const [pairedCount, setPairedCount] = useState(0);
   const [sourceHint, setSourceHint] = useState("");
   const [lineBase, setLineBase] = useState("");
   const [autoLineOn, setAutoLineOn] = useState(autoLineEnabled);
@@ -78,8 +79,11 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
       setSourceHint(active ? `${active.name} v${active.version}` : tr("未设置"));
     }).catch(() => setSourceHint(""));
   };
+  const refreshPeers = () => {
+    void api.tvPeerList().then((list) => setPairedCount(list.length)).catch(() => {});
+  };
   useEffect(() => {
-    const sync = () => { readLine(); readSource(); setAutoLineOn(autoLineEnabled()); };
+    const sync = () => { readLine(); readSource(); refreshPeers(); setAutoLineOn(autoLineEnabled()); };
     sync();
     window.addEventListener("hg:line-changed", sync);
     window.addEventListener("hg:auto-line-changed", sync);
@@ -273,7 +277,8 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
             <Button onClick={() => setQrOpen(true)} className="ios-settings-row text-left pressable">
               <span className="ios-setting-icon"><IScan size={16} /></span>
               <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">{tr("扫码配置 TV")}</div>
+                <div className="text-[14px] text-on">{tr("连接 TV")}</div>
+                {pairedCount > 0 && <div className="text-[12px] text-mut">{tr("已配对 {0} 台", pairedCount)}</div>}
               </div>
               <IChevR size={15} className="text-mut" />
             </Button>
@@ -409,7 +414,7 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
 
       <LinePicker open={lineOpen} onClose={() => { setLineOpen(false); readLine(); }} />
       <SourceManager open={sourceOpen} onClose={() => { setSourceOpen(false); readSource(); }} />
-      <TvQrSyncModal open={qrOpen} onClose={() => setQrOpen(false)} onSuccess={readSource} />
+      <TvQrSyncModal open={qrOpen} initialView={pairedCount > 0 ? "hub" : "scan"} onClose={() => { setQrOpen(false); readSource(); refreshPeers(); }} onSuccess={() => { readSource(); refreshPeers(); }} />
 
       <Modal label={tr("使用条款与免责声明")} open={agreementOpen} onClose={() => setAgreementOpen(false)} width={680}>
         <div className="flex flex-col min-h-0 max-h-[78dvh]">

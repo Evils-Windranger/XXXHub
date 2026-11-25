@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api, APP_VERSION, hostOf, type LineState, type LineItem, type ProxyState, type SourceStateSnapshot } from "../shared/api/api";
+import { listen } from "@tauri-apps/api/event";
+import { api, APP_VERSION, hostOf, type LineState, type LineItem, type PairedPeerSummary, type ProxyState, type SourceStateSnapshot } from "../shared/api/api";
 import { autoLineEnabled, setAutoLine, pickLine } from "../shared/network/autoLine";
 import { useContentPreferences } from "../shared/model/contentPreferences";
 import { UsageAgreementText } from "../shared/ui/UsageAgreement";
@@ -19,11 +20,27 @@ import {
   summarizeReleaseNotes,
   useTvUpdater,
 } from "./updater";
-const groups=["播放偏好","画面边距","启动密码","标签屏蔽","视频源","线路","网络","缓存","关于"];
+
+const groups=["播放偏好","画面边距","启动密码","标签屏蔽","手机同步","视频源","线路","网络","缓存","关于"];
+
+function formatSyncTime(ts: number) {
+  if (!ts) return "";
+  const diff = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  if (diff < 60) return "刚刚同步";
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前同步`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前同步`;
+  return `${Math.floor(diff / 86400)} 天前同步`;
+}
+
 export default function SettingsPage(){
   const [group,setGroup]=useState(groups[0]),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[agreement,setAgreement]=useState(false),[pinModal,setPinModal]=useState<TvPinModalMode|null>(null);
   const [lines,setLines]=useState<LineState|null>(null),[proxy,setProxy]=useState<ProxyState|null>(null),[auto,setAuto]=useState(autoLineEnabled);
   const [sources,setSources]=useState<SourceStateSnapshot|null>(null);
+  const [peers,setPeers]=useState<PairedPeerSummary[]>([]);
+  const [manualOpen,setManualOpen]=useState(false);
+  const [manualDraft,setManualDraft]=useState("");
+  const [manualError,setManualError]=useState("");
+  const fileRef=useRef<HTMLInputElement>(null);
   const [mirrors,setMirrors]=useState<LineItem[]>([]),[mirrorError,setMirrorError]=useState("");
   const operation = useRef(false);
   const preferences=useContentPreferences(),display=useTvDisplay(),playback=usePlaybackPreferences(),pin=useTvPin(),updater=useTvUpdater();
@@ -37,8 +54,32 @@ export default function SettingsPage(){
   },[]);
   const readMirrors=async()=>{setMirrorError("");try{const result=await api.lineMirrors();setMirrors(result.items);}catch(e){setMirrorError(String(e));}};
   const refreshSources=()=>{void api.sourceState().then(setSources).catch(()=>{});};
-  useEffect(()=>{if(group==="线路")void readMirrors();if(group==="视频源")refreshSources();},[group]);
+  const refreshPeers=()=>{void api.tvPeerList().then(setPeers).catch(()=>{});};
+  useEffect(()=>{
+    if(group==="线路")void readMirrors();
+    if(group==="视频源")refreshSources();
+    if(group==="手机同步"){
+      refreshPeers();
+      let unlisten: (() => void) | null = null;
+      void listen("hg:tv-peers-changed", () => refreshPeers()).then(fn => { unlisten = fn; }).catch(()=>{});
+      return () => { unlisten?.(); };
+    }
+  },[group]);
   const run=async(action:()=>Promise<unknown>,success="已保存")=>{if(operation.current)return;operation.current=true;setBusy(true);setMessage("");try{await action();if(success)setMessage(success);}catch(e){setMessage(String(e));}finally{operation.current=false;setBusy(false);}};
+  const submitManual=async(override?: string)=>{
+    const raw=(override??manualDraft).trim();
+    if(!raw)return;
+    setManualError("");
+    await run(async()=>{
+      const s=await api.sourceImport(raw,true);
+      setManualDraft("");
+      setManualOpen(false);
+      refreshSources();
+      window.dispatchEvent(new Event("hg:line-changed"));
+      window.dispatchEvent(new Event("hg:source-changed"));
+      setMessage(`已导入 ${s.name} v${s.version}`);
+    },"");
+  };
   const availableLines=[...new Map([...(lines?.fixed||[]),...mirrors].map(line=>[line.url,line])).values()];
   const hasUpdate=Boolean(updater.info?.has_update);
   const apkSize=formatApkSize(updater.info?.asset?.size);
@@ -69,13 +110,31 @@ export default function SettingsPage(){
       {group==="画面边距"&&<><p>背景和视频始终铺满屏幕。边距只作用于文字与控件。</p>{([['horizontal','左右'],['top','顶部'],['bottom','底部']] as const).map(([key,label])=><div className="tv-setting-row" data-tv-region={`margin-${key}`} key={key}><span>{label} {display[key]}%</span><button data-tv-focus={`margin-${key}-minus`} disabled={display[key]<=0} aria-label={`减少${label}边距`} onClick={()=>{if(!setTvDisplay({...display,[key]:display[key]-1}))setMessage("边距已生效，保存失败，请重试");}}>−</button><button data-tv-focus={`margin-${key}-plus`} disabled={display[key]>=12} aria-label={`增加${label}边距`} onClick={()=>{if(!setTvDisplay({...display,[key]:display[key]+1}))setMessage("边距已生效，保存失败，请重试");}}>＋</button></div>)}<button data-tv-focus="margin-reset" onClick={()=>{if(!setTvDisplay({horizontal:3,top:3,bottom:3}))setMessage("边距已生效，保存失败，请重试");}}>恢复 3% 边距</button></>}
       {group==="启动密码"&&<><p>开启后，每次打开软件都需输入 4 位数字 PIN 码后才能进入。</p><div data-tv-region="pin-options" data-tv-columns="1"><button role="switch" aria-checked={pin.enabled} data-tv-focus="pin-toggle" onClick={()=>{setMessage("");setPinModal(pin.enabled?"disable":"setup");}}>启动密码锁：{pin.enabled?"开启":"关闭"}</button>{pin.enabled&&<button data-tv-focus="pin-change" onClick={()=>{setMessage("");setPinModal("change");}}>修改 4 位密码</button>}{pin.enabled&&<button data-tv-focus="pin-lock-now" onClick={()=>lockTvSession()}>立即锁定软件</button>}</div></>}
       {group==="标签屏蔽"&&<><div data-tv-region="tag-switches" data-tv-columns="1"><button role="switch" aria-checked={preferences.preferences.paused} data-tv-focus="block-paused" onClick={()=>preferences.setPaused(!preferences.preferences.paused)}>暂停屏蔽：{preferences.preferences.paused?"开启":"关闭"}</button><button role="switch" aria-checked={preferences.preferences.hideUntagged} data-tv-focus="hide-untagged" onClick={()=>preferences.setHideUntagged(!preferences.preferences.hideUntagged)}>隐藏无标签内容：{preferences.preferences.hideUntagged?"开启":"关闭"}</button></div><p>在作品详情的“更多”中选择标签屏蔽。选择下方标签可以解除。</p><div className="tv-tags" data-tv-region="blocked-tags" data-tv-columns="3">{preferences.preferences.blockedTags.map(tag=><button key={tag} data-tv-focus={`blocked-${tag}`} onClick={()=>preferences.unblockTag(tag)}>解除：{tag}</button>)}</div></>}
-      {group==="视频源"&&<>
-        <p>当前：{sources?.activeSourceId?(sources.sources.find(s=>s.id===sources.activeSourceId)?.name||sources.activeSourceId):"未设置"}</p>
+      {group==="手机同步"&&<>
         <TvLanPushPanel
-          onImported={()=>{refreshSources();}}
+          compact
+          onImported={()=>{refreshSources();refreshPeers();}}
           onMessage={setMessage}
         />
-        <div data-tv-region="source-list" data-tv-columns="1" style={{marginTop:14}}>
+        <h3>已配对设备</h3>
+        {!peers.length ? (
+          <p>配对一次后，手机同 Wi-Fi 下无需再扫码，可随时双向同步收藏与进度。</p>
+        ) : (
+          <div data-tv-region="peer-list" data-tv-columns="1">
+            {peers.map(peer=><div key={peer.pairId} className="tv-setting-row">
+              <span>{peer.name} <small>({peer.lastIp} · {formatSyncTime(peer.lastSyncedAt)})</small></span>
+              <button data-tv-focus={`peer-rm-${peer.pairId}`} disabled={busy} onClick={()=>void run(async()=>{setPeers(await api.tvPeerRemove(peer.pairId));},"已解除配对")}>解除配对</button>
+            </div>)}
+          </div>
+        )}
+      </>}
+      {group==="视频源"&&<>
+        <p>当前：{sources?.activeSourceId?(sources.sources.find(s=>s.id===sources.activeSourceId)?.name||sources.activeSourceId):"未设置"}</p>
+        <div className="tv-options" data-tv-region="source-actions">
+          <button data-tv-focus="src-go-sync" onClick={()=>{setMessage("");setGroup("手机同步");}}>手机扫码导入</button>
+          <button data-tv-focus="src-manual-btn" onClick={()=>{setManualError("");setManualOpen(true);}}>手动输入 / 本地文件</button>
+        </div>
+        <div data-tv-region="source-list" data-tv-columns="1" style={{marginTop:10}}>
           {(sources?.sources||[]).map(src=><div key={src.id} className="tv-setting-row" style={{flexWrap:"wrap",gap:8,marginTop:8}}>
             <span>{src.name} v{src.version}{src.active?" · 使用中":""}</span>
             {src.active
@@ -113,5 +172,18 @@ export default function SettingsPage(){
           <button data-tv-focus="read-agreement" onClick={()=>setAgreement(true)}>查看使用协议</button>
         </div>
       </>}
-    </section></div>{agreement&&<TvModal id="about-agreement" title="使用协议" onClose={()=>setAgreement(false)}><div data-tv-focus="about-agreement-text" data-tv-scroll tabIndex={0} className="tv-agreement-review"><UsageAgreementText/></div></TvModal>}{pinModal&&<TvPinSettingsModal mode={pinModal} onClose={()=>setPinModal(null)} onDone={msg=>{setPinModal(null);setMessage(msg);}}/>}</>;
+    </section></div>
+    {manualOpen&&<TvModal id="tv-settings-manual" title="手动导入视频源" onClose={()=>{if(!busy)setManualOpen(false);}}>
+      <div data-tv-region="settings-manual-form" data-tv-columns="1">
+        <input data-tv-focus="settings-src-input" className="tv-lan-input" value={manualDraft} onChange={e=>setManualDraft(e.target.value)} placeholder="npm:包名 / 链接 / JSON"/>
+        {manualError&&<p role="alert" className="tv-lan-error">{manualError}</p>}
+        <div className="tv-options" style={{marginTop:12,padding:0}}>
+          <button data-tv-focus="settings-src-go" disabled={busy||!manualDraft.trim()} onClick={()=>void submitManual()}>{busy?"导入中…":"导入"}</button>
+          <button data-tv-focus="settings-src-file" disabled={busy} onClick={()=>fileRef.current?.click()}>本地文件</button>
+          <button data-tv-focus="settings-src-cancel" disabled={busy} onClick={()=>setManualOpen(false)}>取消</button>
+          <input ref={fileRef} type="file" accept=".json,.hgsrc,.txt" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)void f.text().then(t=>void submitManual(t)).catch(()=>setManualError("读取文件失败"));e.target.value="";}}/>
+        </div>
+      </div>
+    </TvModal>}
+    {agreement&&<TvModal id="about-agreement" title="使用协议" onClose={()=>setAgreement(false)}><div data-tv-focus="about-agreement-text" data-tv-scroll tabIndex={0} className="tv-agreement-review"><UsageAgreementText/></div></TvModal>}{pinModal&&<TvPinSettingsModal mode={pinModal} onClose={()=>setPinModal(null)} onDone={msg=>{setPinModal(null);setMessage(msg);}}/>}</>;
 }

@@ -3,6 +3,7 @@
 pub(crate) mod commands;
 pub(crate) mod lan_push;
 pub(crate) mod manifest;
+pub(crate) mod peer_store;
 pub(crate) mod runtime;
 pub(crate) mod store;
 pub(crate) mod verify;
@@ -10,16 +11,23 @@ pub(crate) mod verify;
 use once_cell::sync::Lazy;
 use std::path::Path;
 use std::sync::Arc;
+use peer_store::PeerStore;
 use store::SourceStore;
 
 static STORE: Lazy<Arc<SourceStore>> = Lazy::new(|| Arc::new(SourceStore::new()));
+static PEER_STORE: Lazy<Arc<PeerStore>> = Lazy::new(|| Arc::new(PeerStore::new()));
 
 pub(crate) fn store_arc() -> Arc<SourceStore> {
     Arc::clone(&STORE)
 }
 
+pub(crate) fn peer_store_arc() -> Arc<PeerStore> {
+    Arc::clone(&PEER_STORE)
+}
+
 pub fn bind(app_data_dir: &Path) {
     STORE.bind(app_data_dir);
+    PEER_STORE.bind(app_data_dir);
     let origin = active_default_origin();
     if !origin.is_empty() && crate::net::base().is_empty() {
         crate::net::sync_base_for_source(&origin);

@@ -229,6 +229,17 @@ export const api = {
   sourceLanPushStatus: () => call<LanPushStatus>("source_lan_push_status"),
   sourceLanPushToTv: (targetUrl: string, includeSource: boolean, sync?: TvSyncData | null) =>
     call<LanPushClientResult>("source_lan_push_to_tv", { targetUrl, includeSource, sync: sync ?? null }),
+  tvPeerStart: (deviceName?: string) => call<LanPushSession>("tv_peer_start", { deviceName: deviceName ?? null }),
+  tvPeerUpdateSnapshot: (snapshot: TvSyncData) => call<void>("tv_peer_update_snapshot", { snapshot }),
+  tvPeerDiscover: () => call<DiscoveredTv[]>("tv_peer_discover"),
+  tvPeerList: () => call<PairedPeerSummary[]>("tv_peer_list"),
+  tvPeerRemove: (pairId: string) => call<PairedPeerSummary[]>("tv_peer_remove", { pairId }),
+  tvPeerPairQr: (targetUrl: string, phoneName: string, includeSource: boolean, sync?: TvSyncData | null) =>
+    call<TvBidirectionalSyncResult>("tv_peer_pair_qr", { targetUrl, phoneName, includeSource, sync: sync ?? null }),
+  tvPeerPairCode: (ip: string, port: number, code: string, phoneName: string, includeSource: boolean, sync?: TvSyncData | null) =>
+    call<TvBidirectionalSyncResult>("tv_peer_pair_code", { ip, port, code, phoneName, includeSource, sync: sync ?? null }),
+  tvPeerSync: (pairId: string, ipOverride?: string | null, portOverride?: number | null, includeSource = true, sync?: TvSyncData | null) =>
+    call<TvBidirectionalSyncResult>("tv_peer_sync", { pairId, ipOverride: ipOverride ?? null, portOverride: portOverride ?? null, includeSource, sync: sync ?? null }),
 
   /* 更新检查：对比 GitHub Release 的 tag */
   checkUpdate: (opts?: { edition?: "tv"; currentVersion?: string }) =>
@@ -366,6 +377,9 @@ export type LanPushSession = {
   ip: string;
   port: number;
   token: string;
+  code?: string;
+  deviceId?: string;
+  name?: string;
 };
 
 export type TvSyncHistoryItem = {
@@ -397,6 +411,42 @@ export type TvSyncEnvelope = {
   syncId: number;
   source?: InstalledSourceSummary | null;
   sync: TvSyncData;
+  peerName?: string | null;
+};
+
+export type PairedPeerSummary = {
+  pairId: string;
+  peerDeviceId: string;
+  name: string;
+  lastIp: string;
+  lastPort: number;
+  pairedAt: number;
+  lastSyncedAt: number;
+};
+
+export type DiscoveredTv = {
+  deviceId: string;
+  name: string;
+  ip: string;
+  port: number;
+  pairing: boolean;
+  pairId?: string | null;
+  lastSyncedAt?: number | null;
+};
+
+export type TvBidirectionalSyncResult = {
+  ok: boolean;
+  pairId?: string | null;
+  tvName: string;
+  tvIp: string;
+  sourceName?: string | null;
+  sourceVersion?: string | null;
+  pushedFavs: number;
+  pushedPostFavs: number;
+  pushedHistory: number;
+  tvSync: TvSyncData;
+  importedSourceFromTv?: InstalledSourceSummary | null;
+  legacySourceOnly: boolean;
 };
 
 export type LanPushClientResult = {
@@ -411,7 +461,9 @@ export type LanPushClientResult = {
 
 export type LanPushStatus = {
   active: boolean;
+  pairing?: boolean;
   url?: string | null;
+  code?: string | null;
   lastImported?: InstalledSourceSummary | null;
   lastSync?: TvSyncEnvelope | null;
 };
