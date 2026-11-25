@@ -11,8 +11,8 @@ use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex, Weak};
 
-static IMG_CACHE: Lazy<Mutex<HashMap<String, Arc<Vec<u8>>>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static IMG_CACHE: Lazy<Mutex<crate::cache::LruCache<Arc<Vec<u8>>>>> =
+    Lazy::new(|| Mutex::new(crate::cache::LruCache::new(IMG_CACHE_MAX, IMG_CACHE_MAX_BYTES)));
 type ImageResult = Result<(String, Arc<Vec<u8>>), String>;
 type ImageLoad = tokio::sync::OnceCell<ImageResult>;
 // 背景、视频 poster 和详情可能同时请求同一张图，共享下载和解密。
@@ -21,6 +21,7 @@ static IMG_LOADING: Lazy<Mutex<HashMap<(u64, String), Weak<ImageLoad>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 static IMG_GENERATION: AtomicU64 = AtomicU64::new(0);
 const IMG_CACHE_MAX: usize = 240;
+const IMG_CACHE_MAX_BYTES: usize = 48 * 1024 * 1024;
 
 /* ───────────────────────── AES ───────────────────────── */
 
@@ -78,7 +79,7 @@ pub async fn load_image(url: &str) -> ImageResult {
     let req_scope = crate::net::request_scope();
     let generation = IMG_GENERATION.load(Ordering::Acquire);
     let cache_key = format!("{}:{}:{generation}:{url}", u8::from(req_scope.strict), req_scope.generation);
-    if let Some(hit) = IMG_CACHE.lock().unwrap().get(&cache_key).cloned() {
+    if let Some(hit) = IMG_CACHE.lock().unwrap().get(&cache_key) {
         let kind = image_kind(&hit).unwrap_or("image/jpeg");
         return Ok((kind.to_string(), hit));
     }
@@ -99,7 +100,7 @@ pub async fn load_image(url: &str) -> ImageResult {
 
 async fn download_image(url: &str, cache_key: &str, req_scope: crate::net::RequestScope, generation: u64) -> ImageResult {
     // 缓存检查与领取任务之间，另一请求可能已完成。
-    if let Some(hit) = IMG_CACHE.lock().unwrap().get(cache_key).cloned() {
+    if let Some(hit) = IMG_CACHE.lock().unwrap().get(cache_key) {
         let kind = image_kind(&hit).unwrap_or("image/jpeg");
         return Ok((kind.to_string(), hit));
     }
@@ -117,10 +118,7 @@ async fn download_image(url: &str, cache_key: &str, req_scope: crate::net::Reque
     let mut cache = IMG_CACHE.lock().unwrap();
     // 清缓存或切换配置代次后，旧下载可完成当前显示，但不再把结果写回新一代缓存。
     if IMG_GENERATION.load(Ordering::Acquire) == generation && crate::net::request_scope() == req_scope {
-        if cache.len() >= IMG_CACHE_MAX {
-            if let Some(key) = cache.keys().next().cloned() { cache.remove(&key); }
-        }
-        cache.insert(cache_key.to_string(), arc.clone());
+        cache.insert(cache_key.to_string(), arc.clone(), arc.len());
     }
     Ok((kind, arc))
 }
@@ -130,6 +128,10 @@ pub(super) fn clear_cache() {
         IMG_GENERATION.fetch_add(1, Ordering::AcqRel);
         g.clear();
     }
+}
+
+pub(super) fn stats() -> (usize, usize, usize) {
+    IMG_CACHE.lock().map(|g| g.stats()).unwrap_or((0, 0, IMG_CACHE_MAX_BYTES))
 }
 
 #[cfg(test)]

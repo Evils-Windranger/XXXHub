@@ -3,13 +3,13 @@
 use crate::net::fetch_bytes_with_url;
 use once_cell::sync::Lazy;
 use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
-use std::collections::HashMap;
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex};
 
-static PL_CACHE: Lazy<Mutex<HashMap<String, Arc<String>>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static PL_CACHE: Lazy<Mutex<crate::cache::LruCache<Arc<String>>>> =
+    Lazy::new(|| Mutex::new(crate::cache::LruCache::new(PL_CACHE_MAX, PL_CACHE_MAX_BYTES)));
 static PL_CACHE_GENERATION: AtomicU64 = AtomicU64::new(0);
 const PL_CACHE_MAX: usize = 60;
+const PL_CACHE_MAX_BYTES: usize = 4 * 1024 * 1024;
 
 /* ───────────────────────── HLS ───────────────────────── */
 
@@ -77,7 +77,7 @@ pub async fn load_playlist(url: &str, prefix: &str) -> Result<Arc<String>, Strin
     let req_scope = crate::net::request_scope();
     let generation = PL_CACHE_GENERATION.load(Ordering::Acquire);
     let cache_key = format!("{}:{}:{generation}:{prefix}|{url}", u8::from(req_scope.strict), req_scope.generation);
-    if let Some(hit) = PL_CACHE.lock().unwrap().get(&cache_key).cloned() { return Ok(hit); }
+    if let Some(hit) = PL_CACHE.lock().unwrap().get(&cache_key) { return Ok(hit); }
     let (final_url, _, bytes) = fetch_bytes_with_url(url).await?;
     let text = std::str::from_utf8(&bytes).map_err(|_| "播放列表不是 UTF-8 文本")?;
     if !text.trim_start_matches('\u{feff}').starts_with("#EXTM3U") {
@@ -88,10 +88,7 @@ pub async fn load_playlist(url: &str, prefix: &str) -> Result<Arc<String>, Strin
     // clear_caches advances the epoch first; never let an older in-flight
     // playlist repopulate the cache after that clear.
     if PL_CACHE_GENERATION.load(Ordering::Acquire) == generation && crate::net::request_scope() == req_scope {
-        if cache.len() >= PL_CACHE_MAX {
-            if let Some(key) = cache.keys().next().cloned() { cache.remove(&key); }
-        }
-        cache.insert(cache_key, arc.clone());
+        cache.insert(cache_key, arc.clone(), arc.len());
     }
     Ok(arc)
 }
@@ -153,6 +150,10 @@ pub(super) fn clear_cache() {
     if let Ok(mut g) = PL_CACHE.lock() {
         g.clear();
     }
+}
+
+pub(super) fn stats() -> (usize, usize, usize) {
+    PL_CACHE.lock().map(|g| g.stats()).unwrap_or((0, 0, PL_CACHE_MAX_BYTES))
 }
 
 #[cfg(test)]

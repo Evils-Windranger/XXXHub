@@ -7,10 +7,10 @@ use std::future::Future;
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex, Weak};
 
 /// AES Key / 分片：拖进度条时同一 key、同一片会被反复拉，缓存住省一次往返。
-static KEY_CACHE: Lazy<Mutex<HashMap<String, (String, Arc<Vec<u8>>)>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
-static SEG_CACHE: Lazy<Mutex<HashMap<String, (String, Arc<Vec<u8>>)>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static KEY_CACHE: Lazy<Mutex<crate::cache::LruCache<(String, Arc<Vec<u8>>)>>> =
+    Lazy::new(|| Mutex::new(crate::cache::LruCache::new(KEY_CACHE_MAX, KEY_CACHE_MAX_BYTES)));
+static SEG_CACHE: Lazy<Mutex<crate::cache::LruCache<(String, Arc<Vec<u8>>)>>> =
+    Lazy::new(|| Mutex::new(crate::cache::LruCache::new(SEG_CACHE_MAX, SEG_CACHE_TOTAL_BYTES)));
 static SEG_CACHE_GENERATION: AtomicU64 = AtomicU64::new(0);
 type SegmentResult = Result<(Option<String>, Arc<Vec<u8>>), String>;
 type SegmentLoad = tokio::sync::OnceCell<SegmentResult>;
@@ -20,8 +20,10 @@ static SEG_LOADING: Lazy<Mutex<HashMap<String, Weak<SegmentLoad>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 const KEY_CACHE_MAX: usize = 120;
+const KEY_CACHE_MAX_BYTES: usize = 4 * 1024 * 1024;
 const SEG_CACHE_MAX: usize = 36;
 const SEG_CACHE_MAX_BYTES: usize = 4 * 1024 * 1024;
+const SEG_CACHE_TOTAL_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct SegmentScope {
@@ -47,10 +49,10 @@ fn segment_cache_key(scope: SegmentScope, url: &str) -> String {
 
 fn cached_segment(scope: SegmentScope, url: &str) -> Option<(String, Arc<Vec<u8>>)> {
     let key = segment_cache_key(scope, url);
-    if let Some(hit) = KEY_CACHE.lock().unwrap().get(&key).cloned() {
+    if let Some(hit) = KEY_CACHE.lock().unwrap().get(&key) {
         return Some(hit);
     }
-    SEG_CACHE.lock().unwrap().get(&key).cloned()
+    SEG_CACHE.lock().unwrap().get(&key)
 }
 
 /// Discard a response that belongs to a superseded transport or cache epoch.
@@ -86,23 +88,14 @@ where
         return true;
     }
     let key = segment_cache_key(scope, url);
-    let (cache, max) = if len <= 65536 {
-        (&KEY_CACHE, KEY_CACHE_MAX)
-    } else {
-        (&SEG_CACHE, SEG_CACHE_MAX)
-    };
+    let cache = if len <= 65536 { &KEY_CACHE } else { &SEG_CACHE };
     let mut cache = cache.lock().unwrap();
     // clear_caches advances the epoch before clearing maps. Recheck while
     // holding the map lock so a late writer can never insert after that clear.
     if current_scope() != scope {
         return false;
     }
-    if cache.len() >= max {
-        if let Some(oldest) = cache.keys().next().cloned() {
-            cache.remove(&oldest);
-        }
-    }
-    cache.insert(key, (mime, bytes));
+    cache.insert(key, (mime, bytes), len);
     true
 }
 
@@ -196,6 +189,12 @@ pub(super) fn clear_cache() {
     if let Ok(mut g) = SEG_LOADING.lock() {
         g.clear();
     }
+}
+
+pub(super) fn stats() -> (usize, usize, usize) {
+    let (kc, kb, kl) = KEY_CACHE.lock().map(|g| g.stats()).unwrap_or((0, 0, KEY_CACHE_MAX_BYTES));
+    let (sc, sb, sl) = SEG_CACHE.lock().map(|g| g.stats()).unwrap_or((0, 0, SEG_CACHE_TOTAL_BYTES));
+    (kc + sc, kb + sb, kl + sl)
 }
 
 #[cfg(test)]

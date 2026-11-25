@@ -37,10 +37,7 @@ export default function SettingsPage(){
   const [lines,setLines]=useState<LineState|null>(null),[proxy,setProxy]=useState<ProxyState|null>(null),[auto,setAuto]=useState(autoLineEnabled);
   const [sources,setSources]=useState<SourceStateSnapshot|null>(null);
   const [peers,setPeers]=useState<PairedPeerSummary[]>([]);
-  const [manualOpen,setManualOpen]=useState(false);
-  const [manualDraft,setManualDraft]=useState("");
-  const [manualError,setManualError]=useState("");
-  const fileRef=useRef<HTMLInputElement>(null);
+  const [cacheInfo,setCacheInfo]=useState<{usedBytes:number;limitBytes:number}|null>(null);
   const [mirrors,setMirrors]=useState<LineItem[]>([]),[mirrorError,setMirrorError]=useState("");
   const operation = useRef(false);
   const preferences=useContentPreferences(),display=useTvDisplay(),playback=usePlaybackPreferences(),pin=useTvPin(),updater=useTvUpdater();
@@ -55,9 +52,11 @@ export default function SettingsPage(){
   const readMirrors=async()=>{setMirrorError("");try{const result=await api.lineMirrors();setMirrors(result.items);}catch(e){setMirrorError(String(e));}};
   const refreshSources=()=>{void api.sourceState().then(setSources).catch(()=>{});};
   const refreshPeers=()=>{void api.tvPeerList().then(setPeers).catch(()=>{});};
+  const refreshCache=()=>{void api.cacheStats().then(s=>{if(s&&typeof s.usedBytes==="number")setCacheInfo(s);}).catch(()=>{});};
   useEffect(()=>{
     if(group==="线路")void readMirrors();
     if(group==="视频源")refreshSources();
+    if(group==="缓存")refreshCache();
     if(group==="手机同步"){
       refreshPeers();
       let unlisten: (() => void) | null = null;
@@ -66,28 +65,6 @@ export default function SettingsPage(){
     }
   },[group]);
   const run=async(action:()=>Promise<unknown>,success="已保存")=>{if(operation.current)return;operation.current=true;setBusy(true);setMessage("");try{await action();if(success)setMessage(success);}catch(e){setMessage(String(e));}finally{operation.current=false;setBusy(false);}};
-  const submitManual=async(override?: string)=>{
-    const raw=(override??manualDraft).trim();
-    if(!raw||operation.current)return;
-    operation.current=true;
-    setBusy(true);
-    setManualError("");
-    setMessage("");
-    try{
-      const s=await api.sourceImport(raw,true);
-      setManualDraft("");
-      setManualOpen(false);
-      refreshSources();
-      window.dispatchEvent(new Event("hg:line-changed"));
-      window.dispatchEvent(new Event("hg:source-changed"));
-      setMessage(`已导入 ${s.name} v${s.version}`);
-    }catch(e){
-      setManualError(e instanceof Error?e.message:String(e));
-    }finally{
-      operation.current=false;
-      setBusy(false);
-    }
-  };
   const availableLines=[...new Map([...(lines?.fixed||[]),...mirrors].map(line=>[line.url,line])).values()];
   const hasUpdate=Boolean(updater.info?.has_update);
   const apkSize=formatApkSize(updater.info?.asset?.size);
@@ -117,7 +94,7 @@ export default function SettingsPage(){
       {group==="播放偏好"&&<><h3>默认倍速</h3><div className="tv-options" data-tv-region="default-rate">{[0.75,1,1.25,1.5,2].map(rate=><button role="radio" aria-checked={playback.rate===rate} data-tv-focus={`rate-${rate}`} key={rate} onClick={()=>{try{setPlaybackPreferences({rate});}catch(e){setMessage(String(e));}}}>{rate}×</button>)}</div><h3>默认清晰度</h3><div className="tv-options" data-tv-region="default-quality">{(["main","hevc"] as const).map(quality=><button key={quality} role="radio" aria-checked={playback.quality===quality} data-tv-focus={`quality-${quality}`} onClick={()=>{try{setPlaybackPreferences({quality});}catch(e){setMessage(String(e));}}}>{quality==="main"?"标准":"高清 HEVC（如有）"}</button>)}</div><button role="switch" aria-checked={playback.autoplayNext} data-tv-focus="autoplay-next" onClick={()=>{try{setPlaybackPreferences({autoplayNext:!playback.autoplayNext});}catch(e){setMessage(String(e));}}}>作品内自动续集：{playback.autoplayNext?"开启":"关闭"}</button></>}
       {group==="画面边距"&&<><p>背景和视频始终铺满屏幕。边距只作用于文字与控件。</p>{([['horizontal','左右'],['top','顶部'],['bottom','底部']] as const).map(([key,label])=><div className="tv-setting-row" data-tv-region={`margin-${key}`} key={key}><span>{label} {display[key]}%</span><button data-tv-focus={`margin-${key}-minus`} disabled={display[key]<=0} aria-label={`减少${label}边距`} onClick={()=>{if(!setTvDisplay({...display,[key]:display[key]-1}))setMessage("边距已生效，保存失败，请重试");}}>−</button><button data-tv-focus={`margin-${key}-plus`} disabled={display[key]>=12} aria-label={`增加${label}边距`} onClick={()=>{if(!setTvDisplay({...display,[key]:display[key]+1}))setMessage("边距已生效，保存失败，请重试");}}>＋</button></div>)}<button data-tv-focus="margin-reset" onClick={()=>{if(!setTvDisplay({horizontal:3,top:3,bottom:3}))setMessage("边距已生效，保存失败，请重试");}}>恢复 3% 边距</button></>}
       {group==="启动密码"&&<><p>开启后，每次打开软件都需输入 4 位数字 PIN 码后才能进入。</p><div data-tv-region="pin-options" data-tv-columns="1"><button role="switch" aria-checked={pin.enabled} data-tv-focus="pin-toggle" onClick={()=>{setMessage("");setPinModal(pin.enabled?"disable":"setup");}}>启动密码锁：{pin.enabled?"开启":"关闭"}</button>{pin.enabled&&<button data-tv-focus="pin-change" onClick={()=>{setMessage("");setPinModal("change");}}>修改 4 位密码</button>}{pin.enabled&&<button data-tv-focus="pin-lock-now" onClick={()=>lockTvSession()}>立即锁定软件</button>}</div></>}
-      {group==="标签屏蔽"&&<><div data-tv-region="tag-switches" data-tv-columns="1"><button role="switch" aria-checked={preferences.preferences.paused} data-tv-focus="block-paused" onClick={()=>preferences.setPaused(!preferences.preferences.paused)}>暂停屏蔽：{preferences.preferences.paused?"开启":"关闭"}</button><button role="switch" aria-checked={preferences.preferences.hideUntagged} data-tv-focus="hide-untagged" onClick={()=>preferences.setHideUntagged(!preferences.preferences.hideUntagged)}>隐藏无标签内容：{preferences.preferences.hideUntagged?"开启":"关闭"}</button></div><p>在作品详情的“更多”中选择标签屏蔽。选择下方标签可以解除。</p><div className="tv-tags" data-tv-region="blocked-tags" data-tv-columns="3">{preferences.preferences.blockedTags.map(tag=><button key={tag} data-tv-focus={`blocked-${tag}`} onClick={()=>preferences.unblockTag(tag)}>解除：{tag}</button>)}</div></>}
+      {group==="标签屏蔽"&&<><div data-tv-region="tag-switches" data-tv-columns="1"><button role="switch" aria-checked={!preferences.preferences.paused} data-tv-focus="block-paused" onClick={()=>preferences.setPaused(!preferences.preferences.paused)}>内容屏蔽：{preferences.preferences.paused?"关闭":"开启"}</button><button role="switch" aria-checked={preferences.preferences.hideUntagged} disabled={preferences.preferences.paused} data-tv-focus="hide-untagged" onClick={()=>preferences.setHideUntagged(!preferences.preferences.hideUntagged)}>隐藏无标签内容：{preferences.preferences.hideUntagged?"开启":"关闭"}</button></div><p>在作品详情的“更多”中选择标签屏蔽。选择下方标签可以解除。</p><div className="tv-tags" data-tv-region="blocked-tags" data-tv-columns="3">{preferences.preferences.blockedTags.map(tag=><button key={tag} data-tv-focus={`blocked-${tag}`} onClick={()=>preferences.unblockTag(tag)}>解除：{tag}</button>)}</div></>}
       {group==="手机同步"&&<>
         <TvLanPushPanel
           compact
@@ -140,7 +117,6 @@ export default function SettingsPage(){
         <p>当前：{sources?.activeSourceId?(sources.sources.find(s=>s.id===sources.activeSourceId)?.name||sources.activeSourceId):"未设置"}</p>
         <div className="tv-options" data-tv-region="source-actions">
           <button data-tv-focus="src-go-sync" onClick={()=>{setMessage("");setGroup("手机同步");}}>手机扫码导入</button>
-          <button data-tv-focus="src-manual-btn" onClick={()=>{setManualError("");setManualOpen(true);}}>手动输入 / 本地文件</button>
         </div>
         <div data-tv-region="source-list" data-tv-columns="1" style={{marginTop:10}}>
           {(sources?.sources||[]).map(src=><div key={src.id} className="tv-setting-row" style={{flexWrap:"wrap",gap:8,marginTop:8}}>
@@ -157,7 +133,7 @@ export default function SettingsPage(){
       </>}
       {group==="线路"&&<><p>当前：{lines?(hostOf(lines.base)||"未设置"):"正在读取"}</p><div data-tv-region="line-options" data-tv-columns="1"><button disabled={busy} role="switch" aria-checked={auto} data-tv-focus="auto-line" onClick={()=>void run(async()=>{await setAutoLine(!auto);setAuto(!auto);})}>自动选线：{auto?"开启":"关闭"}</button><button data-tv-focus="pick-line" disabled={busy||!auto} onClick={()=>void run(async()=>{await pickLine("tv-settings",true);setLines(await api.lineState());})}>重新检测可用线路</button>{mirrorError&&<p role="status">{mirrorError}</p>}<button data-tv-focus="refresh-mirrors" disabled={busy} onClick={()=>void run(readMirrors,"镜像线路已更新")}>刷新镜像线路</button>{availableLines.map(line=><button key={line.url} data-tv-focus={`line-${line.url}`} role="radio" aria-checked={lines?.base===line.url} disabled={busy} onClick={()=>void run(async()=>{await setAutoLine(false);setAuto(false);await api.lineSet(line.url);window.dispatchEvent(new Event("hg:line-changed"));setLines(await api.lineState());})}>{line.name||hostOf(line.url)}</button>)}</div></>}
       {group==="网络"&&<><p>使用电视系统代理，或直接连接。网络设置影响当前应用。</p><div data-tv-region="proxy-options" data-tv-columns="1">{(["system","off"] as const).map(mode=><button key={mode} disabled={busy} role="radio" aria-checked={proxy?.mode===mode} data-tv-focus={`proxy-${mode}`} onClick={()=>void run(async()=>{setProxy(await api.proxySet(mode,""));window.dispatchEvent(new Event("hg:proxy-changed"));})}>{mode==="system"?"跟随系统代理":"直连"}</button>)}</div></>}
-      {group==="缓存"&&<><p>清理图片与媒体缓存，保留本地片库、迁移记录及偏好。搜索目录可在搜索页单独刷新。</p><button data-tv-focus="clear-cache" disabled={busy} onClick={()=>void run(async()=>{await api.clearCache();resetCachedTvUpdate();},"缓存已清理，片库和偏好已保留")}>清理缓存</button></>}
+      {group==="缓存"&&<><p>{cacheInfo&&cacheInfo.usedBytes>0?`当前已缓存约 ${formatApkSize(cacheInfo.usedBytes)}，`:""}超过 {Math.round((cacheInfo?.limitBytes??120*1024*1024)/(1024*1024))} MB 时会自动清理较早缓存。手动清理不会影响本地片库、同步记录与偏好设置。</p><button data-tv-focus="clear-cache" disabled={busy} onClick={()=>void run(async()=>{await api.clearCache();resetCachedTvUpdate();refreshCache();},"缓存已清理，片库和偏好已保留")}>清理缓存</button></>}
       {group==="关于"&&<><h3>HGhubX TV {APP_VERSION}</h3>
         <div className="tv-update-card">
           {updater.status==="idle"&&<p>支持电视端应用内一键更新（内置加速节点自动回退与 SHA-256 完整性校验）。</p>}
@@ -181,17 +157,5 @@ export default function SettingsPage(){
         </div>
       </>}
     </section></div>
-    {manualOpen&&<TvModal id="tv-settings-manual" title="手动导入视频源" onClose={()=>{if(!busy)setManualOpen(false);}}>
-      <div data-tv-region="settings-manual-form" data-tv-columns="1">
-        <input data-tv-focus="settings-src-input" className="tv-lan-input" value={manualDraft} onChange={e=>setManualDraft(e.target.value)} placeholder="npm:包名 / 链接 / JSON"/>
-        {manualError&&<p role="alert" className="tv-lan-error">{manualError}</p>}
-        <div className="tv-options" style={{marginTop:12,padding:0}}>
-          <button data-tv-focus="settings-src-go" disabled={busy||!manualDraft.trim()} onClick={()=>void submitManual()}>{busy?"导入中…":"导入"}</button>
-          <button data-tv-focus="settings-src-file" disabled={busy} onClick={()=>fileRef.current?.click()}>本地文件</button>
-          <button data-tv-focus="settings-src-cancel" disabled={busy} onClick={()=>setManualOpen(false)}>取消</button>
-          <input ref={fileRef} type="file" accept=".json,.hgsrc,.txt" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)void f.text().then(t=>void submitManual(t)).catch(()=>setManualError("读取文件失败"));e.target.value="";}}/>
-        </div>
-      </div>
-    </TvModal>}
     {agreement&&<TvModal id="about-agreement" title="使用协议" onClose={()=>setAgreement(false)}><div data-tv-focus="about-agreement-text" data-tv-scroll tabIndex={0} className="tv-agreement-review"><UsageAgreementText/></div></TvModal>}{pinModal&&<TvPinSettingsModal mode={pinModal} onClose={()=>setPinModal(null)} onDone={msg=>{setPinModal(null);setMessage(msg);}}/>}</>;
 }

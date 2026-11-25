@@ -37,9 +37,9 @@
   `SessionStore`、`bind()`、`token()`、`snapshot()`、`stored_origin()`、`rebase_if_trusted()`、
   `rebase_or_clear()`、`reconcile_on_boot()`、
   `set_if_revision()`、`is_current()`、`update_user_if_current()`、`clear_if_current()`、`persist()`。
-- 清缓存：[`src-tauri/src/api/platform.rs`](../../src-tauri/src/api/platform.rs) 的
-  `cache_clear`；[`src-tauri/src/cache.rs`](../../src-tauri/src/cache.rs) 的
-  `CacheClearReport`、`clear_web_cache()`、`safe_cache_types()`。
+- 清缓存与缓存统计：[`src-tauri/src/api/platform.rs`](../../src-tauri/src/api/platform.rs) 的
+  `cache_stats`、`cache_clear`；[`src-tauri/src/cache.rs`](../../src-tauri/src/cache.rs) 的
+  `LruCache`、`CacheStatsReport`、`cache_stats()`、`CacheClearReport`、`clear_web_cache()`、`safe_cache_types()`。
 - 账号同步与批量收藏回归：[`scripts/test-account-sync-empty-state.mjs`](../../scripts/test-account-sync-empty-state.mjs)，
   由 `scripts/test-smoke.mjs` 的最后一项 `account-sync` 调用；界面未知态见
   [`src/features/account/Profile.tsx`](../../src/features/account/Profile.tsx) 的 `favoriteStateUnknown`。
@@ -99,10 +99,7 @@
 7. `SessionStore` 把 `{origin, token, user, revision}` 写入应用数据目录的 `session.json`。
    旧版本没有 `origin`，反序列化后 `token()`/`snapshot()` 不会把它分配给当前线路，升级后必须
    重新登录。`revision` 是进程内代次，不落盘；同 token 重新登录也会推进 revision。
-8. `cache_clear` 先清 `media::clear_caches()`（封面、播放列表、Key、分片内存缓存），再由
-   `clear_web_cache()` 清平台 WebView 缓存。Linux 只清 `MEMORY_CACHE`、`DISK_CACHE`、
-   `OFFLINE_APPLICATION_CACHE`，明确排除 cookies、localStorage、sessionStorage、IndexedDB、
-   service worker 和 HSTS；其他平台没有选择性 API，只清应用内内存缓存，`webCache=false`。
+8. 媒体内存缓存（封面 48 MB / 240 条、分片 64 MB / 36 条、Key 4 MB / 120 条、播放列表 4 MB / 60 条，总上限 120 MB）由 [`src-tauri/src/cache.rs`](../../src-tauri/src/cache.rs) 的 `LruCache` 按条数与字节上限自动淘汰较早条目，`cache_stats` 返回当前内存缓存与 `updates` 目录占用及上限。`cache_clear` 先清 `media::clear_caches()`，再由 `clear_web_cache()` 清平台 WebView 缓存。Linux 只清 `MEMORY_CACHE`、`DISK_CACHE`、`OFFLINE_APPLICATION_CACHE`，明确排除 cookies、localStorage、sessionStorage、IndexedDB、service worker 和 HSTS；其他平台不调用 `clear_all_browsing_data`，只清应用内缓存并保留登录与偏好。标准版与 TV 端默认开启自动选线与优先高清（`preferHevc: true` / `quality: "hevc"`）。
 
 ## 状态转换
 

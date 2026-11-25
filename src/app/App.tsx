@@ -1,6 +1,6 @@
 import { LiquidIndicator, Loader } from "../shared/ui/ios/effects";
 import { Button } from "../shared/ui/ios/controls";
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useStore, type Page, type Tab } from "../shared/model/store";
 import { PageCoveredContext } from "../shared/model/pageVisibility";
 import { isMobile, selfTest } from "../shared/api/api";
@@ -51,26 +51,123 @@ function TabBar() {
     { key: "category", label: tr("分类"), Icon: IGrid, Active: IGridF },
     { key: "profile", label: tr("我的"), Icon: IUser, Active: IUserF },
   ] as const;
-  const index = items.findIndex(item => item.key === tab);
+  const index = Math.max(0, items.findIndex(item => item.key === tab));
+  const glassRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startIndex: number;
+    width: number;
+    dragging: boolean;
+    lastSlot: number;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
+  const suppressTimerRef = useRef(0);
+  const [dragPos, setDragPos] = useState<number | null>(null);
+
+  useEffect(() => () => window.clearTimeout(suppressTimerRef.current), []);
+
+  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    suppressClickRef.current = false;
+    window.clearTimeout(suppressTimerRef.current);
+    if (!e.isPrimary || (e.pointerType === "mouse" && e.button !== 0)) return;
+    const rect = glassRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      startIndex: index,
+      width: rect.width,
+      dragging: false,
+      lastSlot: index,
+    };
+  };
+
+  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (!drag.dragging) {
+      if (Math.abs(dx) < 10 || Math.abs(dx) < Math.abs(dy) * 1.1) return;
+      drag.dragging = true;
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    }
+    const slotWidth = drag.width / items.length;
+    const pos = Math.max(0, Math.min(items.length - 1, drag.startIndex + dx / slotWidth));
+    setDragPos(pos);
+    const slot = Math.round(pos);
+    if (slot !== drag.lastSlot) {
+      drag.lastSlot = slot;
+      navigator.vibrate?.(6);
+    }
+  };
+
+  const finishDrag = (e: ReactPointerEvent<HTMLDivElement>, cancelled: boolean) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    dragRef.current = null;
+    if (drag.dragging) {
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+      } catch { /* ignore */ }
+      suppressClickRef.current = true;
+      window.clearTimeout(suppressTimerRef.current);
+      suppressTimerRef.current = window.setTimeout(() => { suppressClickRef.current = false; }, 80);
+      if (!cancelled) {
+        const dx = e.clientX - drag.startX;
+        const slotWidth = drag.width / items.length;
+        let target = Math.round(Math.max(0, Math.min(items.length - 1, drag.startIndex + dx / slotWidth)));
+        if (target === drag.startIndex && Math.abs(dx) >= 24) {
+          target = Math.max(0, Math.min(items.length - 1, drag.startIndex + (dx > 0 ? 1 : -1)));
+        }
+        if (target !== drag.startIndex) setTab(items[target].key);
+      }
+    }
+    setDragPos(null);
+  };
+
+  const onClickCapture = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (!suppressClickRef.current) return;
+    suppressClickRef.current = false;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const activePos = dragPos ?? index;
+  const previewIndex = dragPos !== null ? Math.round(dragPos) : index;
+
   return <nav className="hg-tabbar ios-mobile-nav" aria-label={tr("主导航")} data-over-video={tab === "home"}>
-      <div className="hg-glass">
-      <div className="hg-drop" aria-hidden="true" style={{ transform: `translateX(${index * 100}%)` }}><LiquidIndicator /></div>
+      <div ref={glassRef} className="hg-glass" data-dragging={dragPos !== null ? "true" : undefined}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={(e) => finishDrag(e, false)}
+        onPointerCancel={(e) => finishDrag(e, true)}
+        onClickCapture={onClickCapture}>
+      <div className={`hg-drop${dragPos !== null ? " is-dragging" : ""}`} aria-hidden="true" style={{ transform: `translateX(${activePos * 100}%)` }}><LiquidIndicator /></div>
       <div className="ios-mobile-nav-items">
-        {items.map(({ key, label, Icon, Active }) => {
-          const Glyph = tab === key ? Active : Icon;
-          return <Button key={key} className="ios-mobile-nav-item" onClick={() => {
-            /* Re-tapping the active Search tab returns to the search landing state;
-               the input clear button is hard to reach on tall screens. */
-            if (key === "search" && tab === "search") {
-              window.dispatchEvent(new Event("hg:search-reset"));
-              return;
-            }
-            if (key === "profile" && tab === "profile") {
-              window.dispatchEvent(new Event("hg:profile-reset"));
-              return;
-            }
-            setTab(key);
-          }}
+        {items.map(({ key, label, Icon, Active }, i) => {
+          const isHighlighted = previewIndex === i;
+          const Glyph = isHighlighted ? Active : Icon;
+          return <Button key={key} className="ios-mobile-nav-item"
+            data-preview={dragPos !== null && isHighlighted ? "true" : undefined}
+            onClick={() => {
+              /* Re-tapping the active Search tab returns to the search landing state;
+                 the input clear button is hard to reach on tall screens. */
+              if (key === "search" && tab === "search") {
+                window.dispatchEvent(new Event("hg:search-reset"));
+                return;
+              }
+              if (key === "profile" && tab === "profile") {
+                window.dispatchEvent(new Event("hg:profile-reset"));
+                return;
+              }
+              setTab(key);
+            }}
             aria-current={tab === key ? "page" : undefined}>
             <Glyph size={22} /><span>{label}</span>
           </Button>;

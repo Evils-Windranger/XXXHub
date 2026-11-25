@@ -394,11 +394,14 @@ body { background:var(--motion-paper); }
 .ios-mobile-nav {
   padding:12px calc(14px + var(--sar,0px)) var(--sab,0px) calc(14px + var(--sal,0px));
 }
-.ios-mobile-nav .hg-glass { height:66px; }
+.ios-mobile-nav .hg-glass { height:66px; touch-action:none; }
 .ios-mobile-nav .hg-drop { top:6px; bottom:6px; transition:transform .34s var(--motion-spring); }
+.ios-mobile-nav .hg-drop.is-dragging { transition:none; }
 .ios-mobile-nav .hg-drop>.ios-liquid-fill { margin-inline:4px; width:calc(100% - 8px); background:var(--motion-ink); box-shadow:0 4px 0 rgb(25 25 25 / .12); }
 .ios-mobile-nav .ios-mobile-nav-item { color:var(--p-mut); transition:color .22s ease,scale .28s var(--motion-spring); }
-.ios-mobile-nav .ios-mobile-nav-item[aria-current=page] { color:var(--motion-on-ink); }
+.ios-mobile-nav .ios-mobile-nav-item[aria-current=page],
+.ios-mobile-nav .ios-mobile-nav-item[data-preview=true] { color:var(--motion-on-ink); }
+.ios-mobile-nav .hg-glass[data-dragging=true] .ios-mobile-nav-item[aria-current=page]:not([data-preview=true]) { color:var(--p-mut); }
 
 .ios-dialog { border-radius:32px; background:var(--glass-bg); border-color:var(--glass-edge); box-shadow:var(--ios-shadow); backdrop-filter:blur(28px) saturate(150%); -webkit-backdrop-filter:blur(28px) saturate(150%); }
 .ios-overlay.is-open .ios-dialog { animation:motion-dialog-in .36s var(--motion-spring) both; }
@@ -657,8 +660,35 @@ html.theme-transitioning .ios-account-card { backdrop-filter:none; -webkit-backd
 /* Video navigation keeps a stable dark material in either application theme. */
 .ios-mobile-nav[data-over-video=true] { --ios-glass-solid:#1c1c20; --glass-bg:rgb(28 28 32 / .94); --glass-edge:rgb(255 255 255 / .24); --glass-blur:14px; --glass-shine:linear-gradient(135deg,rgb(255 255 255 / .12),transparent 42%); --motion-ink:#f4f1eb; --motion-on-ink:#191919; }
 .ios-mobile-nav[data-over-video=true] .ios-mobile-nav-item { color:#f2f0eb; font-size:12px; }
-.ios-mobile-nav[data-over-video=true] .ios-mobile-nav-item[aria-current=page] { color:var(--motion-on-ink); }
-.ios-mobile-nav[data-over-video=true] .hg-glass>.ios-mobile-nav-items>[aria-current=page] { color:var(--motion-on-ink); }
+.ios-mobile-nav[data-over-video=true] .ios-mobile-nav-item[aria-current=page],
+.ios-mobile-nav[data-over-video=true] .ios-mobile-nav-item[data-preview=true],
+.ios-mobile-nav[data-over-video=true] .hg-glass>.ios-mobile-nav-items>[aria-current=page],
+.ios-mobile-nav[data-over-video=true] .hg-glass>.ios-mobile-nav-items>[data-preview=true] { color:var(--motion-on-ink); }
+.ios-mobile-nav[data-over-video=true] .hg-glass[data-dragging=true]>.ios-mobile-nav-items>[aria-current=page]:not([data-preview=true]) { color:#f2f0eb; }
+
+/* Compact mobile chrome on short landscape screens so switching tabs in landscape never crushes content or clips controls. */
+@media (max-height:500px) and (orientation:landscape) {
+  .ios-overlay { --overlay-gap:8px; }
+  .ios-page-heading { padding-top:calc(var(--sat,0px) + 8px); padding-bottom:8px; }
+  .ios-page-title { font-size:22px; line-height:1.2; }
+  .ios-mobile-nav {
+    padding:6px calc(14px + var(--sar,0px)) max(6px,var(--native-sab,env(safe-area-inset-bottom,0px))) calc(14px + var(--sal,0px));
+  }
+  .ios-mobile-nav .hg-glass { height:48px; }
+  .ios-mobile-nav .hg-drop { top:4px; bottom:4px; }
+  .ios-mobile-nav .ios-mobile-nav-item { flex-direction:row; gap:6px; font-size:12px; }
+  .ios-mobile-nav .ios-mobile-nav-item svg { width:18px; height:18px; }
+  .plat-android .ios-tab-active .ios-page>.scroll-y,
+  .plat-ios .ios-tab-active .ios-page>.scroll-y {
+    padding-bottom:calc(64px + max(6px,var(--native-sab,env(safe-area-inset-bottom,0px))));
+  }
+  .mobile-video-action-rail {
+    gap:4px!important;
+    --mobile-action-rail-clearance:56px;
+  }
+  .mobile-video-action-rail>.ios-button { min-block-size:36px!important; min-inline-size:36px!important; }
+  .mobile-video-action-rail svg { width:22px; height:22px; }
+}
 
 /* Keep accessibility fallbacks last so the glass layer cannot override them. */
 @media(prefers-reduced-transparency:reduce),(prefers-contrast:more) {

@@ -386,21 +386,37 @@ export function useFeedViewport({
     };
   }, [isDesktop, active, setFs, keepAlive, wake]);
 
+  /* 若用户在其他页面（如「我的」）横屏后再切回首页或点开视频，
+     vpLandscape 早已是 true，需要按当前视口方向同步一次全屏状态。 */
+  const prevActiveForLand = useRef(false);
+  useEffect(() => {
+    const wasActive = prevActiveForLand.current;
+    prevActiveForLand.current = active;
+    if (isDesktop || !active || wasActive) return;
+    const isLand = window.innerWidth > window.innerHeight;
+    setVpLandscape(isLand);
+    if (isLand !== fs) {
+      setFs(isLand);
+      keepAlive();
+      wake();
+    }
+  }, [isDesktop, active, fs, setFs, keepAlive, wake]);
+
   /* 全屏切换或视口旋转后校准滚动容器 scrollTop：
      - 进入全屏时非当前项已隐藏，当前项位于顶部 scrollTop = 0；
      - 退出全屏回到竖屏列表时，立即把 scrollTop 对齐到 index * clientHeight，
        防止错位到其它视频封面（「横屏播放变成别的剧集」的根因）。 */
   useEffect(() => {
     const el = boxRef.current;
-    if (!el) return undefined;
+    if (!el || !active) return undefined;
     if (fs || fullscreen) {
       el.scrollTop = 0;
       return undefined;
     }
     const syncScroll = () => {
       const box = boxRef.current;
-      if (!box || fs || fullscreen) return;
-      const top = index * (box.clientHeight || 1);
+      if (!box || !active || fs || fullscreen || box.clientHeight <= 0) return;
+      const top = index * box.clientHeight;
       anchoredScroll.current = top;
       box.scrollTop = top;
     };
@@ -413,7 +429,7 @@ export function useFeedViewport({
       window.clearTimeout(t1);
       window.clearTimeout(t2);
     };
-  }, [boxRef, fs, fullscreen, vpLandscape, index]);
+  }, [boxRef, active, fs, fullscreen, vpLandscape, index]);
 
   useEffect(() => {
     mountedRef.current = true;

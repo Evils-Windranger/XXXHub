@@ -38,6 +38,13 @@ pub fn clear_caches() {
     segment::clear_cache();
 }
 
+pub fn cache_stats() -> (usize, usize, usize, u64, u64) {
+    let (ic, ib, il) = image::stats();
+    let (sc, sb, sl) = segment::stats();
+    let (pc, pb, pl) = hls::stats();
+    (ic, sc, pc, (ib + sb + pb) as u64, (il + sl + pl) as u64)
+}
+
 /// 统一入口：`<LOCAL_ORIGIN>/img?u=` / `hls?u=` / `seg?u=`
 ///
 /// `origin` 是本平台自定义协议的完整基址，见 [`LOCAL_ORIGIN`]；用于改写 m3u8 里的

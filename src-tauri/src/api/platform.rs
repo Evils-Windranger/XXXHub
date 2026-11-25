@@ -92,6 +92,11 @@ pub async fn security_set(strict: bool) -> Result<bool, String> {
 /* ───────────────────────── 本地缓存 ───────────────────────── */
 
 #[tauri::command]
+pub async fn cache_stats(app: tauri::AppHandle) -> Result<crate::cache::CacheStatsReport, String> {
+    Ok(crate::cache::cache_stats(&app))
+}
+
+#[tauri::command]
 pub async fn cache_clear(
     webview: tauri::Webview,
 ) -> Result<crate::cache::CacheClearReport, String> {

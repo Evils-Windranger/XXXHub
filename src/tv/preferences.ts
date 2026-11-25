@@ -18,9 +18,9 @@ function read(): PlaybackPreferences {
       try { localStorage.removeItem(LEGACY_KEY); } catch { /* ignore */ }
     }
     const value = JSON.parse(raw || "{}");
-    return { rate: [0.75, 1, 1.25, 1.5, 2].includes(value.rate) ? value.rate : 1, quality: value.quality === "hevc" ? "hevc" : "main", autoplayNext: value.autoplayNext !== false };
+    return { rate: [0.75, 1, 1.25, 1.5, 2].includes(value.rate) ? value.rate : 1, quality: value.quality === "main" ? "main" : "hevc", autoplayNext: value.autoplayNext !== false };
   }
-  catch { return { rate: 1, quality: "main", autoplayNext: true }; }
+  catch { return { rate: 1, quality: "hevc", autoplayNext: true }; }
 }
 let state = read();
 const listeners = new Set<() => void>();

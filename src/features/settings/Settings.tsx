@@ -42,6 +42,7 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
   const [autoLineOn, setAutoLineOn] = useState(autoLineEnabled);
   const clearBusy = useRef(false);
   const [clearError, setClearError] = useState("");
+  const [cacheInfo, setCacheInfo] = useState<{ usedBytes: number; limitBytes: number } | null>(null);
   const [lineError, setLineError] = useState("");
   const [clearing, setClearing] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -83,8 +84,11 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
   const refreshPeers = () => {
     void api.tvPeerList().then((list) => setPairedCount(list.length)).catch(() => {});
   };
+  const readCache = () => { void api.cacheStats().then((s) => { if (s && typeof s.usedBytes === "number") setCacheInfo(s); }).catch(() => {}); };
+  const formatCacheBytes = (bytes: number) => bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB` : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : "0 KB";
+  const cacheLimitMb = Math.round((cacheInfo?.limitBytes ?? 120 * 1024 * 1024) / (1024 * 1024));
   useEffect(() => {
-    const sync = () => { readLine(); readSource(); refreshPeers(); setAutoLineOn(autoLineEnabled()); };
+    const sync = () => { readLine(); readSource(); refreshPeers(); readCache(); setAutoLineOn(autoLineEnabled()); };
     sync();
     window.addEventListener("hg:line-changed", sync);
     window.addEventListener("hg:auto-line-changed", sync);
@@ -248,10 +252,13 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
                 <div className="text-[12px] text-mut">{tr("{0} 部收藏 · {1} 条观看记录", favs.length, history.length)}</div>
               </div>
             </div>
-            <Button onClick={() => { setClearError(""); setClearOpen(true); }} className="ios-settings-row text-left pressable">
+            <Button onClick={() => { setClearError(""); readCache(); setClearOpen(true); }} className="ios-settings-row text-left pressable">
               <span className="ios-setting-icon"><IBroom size={16} /></span>
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <div className="text-[14px] text-on">{tr("清理缓存")}</div>
+                <div className="text-[12px] text-mut">{cacheInfo && cacheInfo.usedBytes > 0
+                  ? tr("当前约 {0} · 超过 {1} MB 自动清理旧缓存", formatCacheBytes(cacheInfo.usedBytes), cacheLimitMb)
+                  : tr("超过 {0} MB 时自动清理旧缓存", cacheLimitMb)}</div>
               </div>
               <IChevR size={15} className="text-mut" />
             </Button>
@@ -484,7 +491,11 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
       <Modal label={tr("清理缓存")} open={clearOpen} onClose={() => { if (!clearBusy.current) setClearOpen(false); }} width={330}>
         <div className="p-5">
           <div className="text-[15px] font-bold text-on">{tr("清理缓存")}</div>
-          <p className="text-[13px] text-mut leading-relaxed mt-2">{tr("清除封面、播放列表、Key/分片缓存；Linux 桌面版还会选择性清理 WebKit HTTP/媒体磁盘缓存。登录、收藏、观看记录与本地设置都会保留。")}</p>
+          <p className="text-[13px] text-mut leading-relaxed mt-2">
+            {platform === "linux"
+              ? tr("清理已缓存的图片、视频缓冲与媒体临时文件，释放占用空间。超过 {0} MB 时也会自动清理较早缓存；登录状态、收藏、观看记录与设置均会保留。", cacheLimitMb)
+              : tr("清理已缓存的图片与视频缓冲数据，释放占用空间。超过 {0} MB 时也会自动清理较早缓存；登录状态、收藏、观看记录与设置均会保留。", cacheLimitMb)}
+          </p>
           {clearError && <p role="alert" className="text-[13px] text-danger mt-3">{clearError}</p>}
           <div className="flex gap-2 mt-5">
             <Button disabled={clearing} onClick={() => setClearOpen(false)} className="flex-1 h-9 rounded-(--r-ctl) bg-s3 text-[14px] text-on/80 pressable">{tr("取消")}</Button>
@@ -493,9 +504,10 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
               clearBusy.current = true;
               setClearing(true); setClearError("");
               try {
-                const cleared = await api.clearCache();
+                await api.clearCache();
+                readCache();
                 setClearOpen(false);
-                toast(cleared.webCache ? tr("缓存已清理（含 WebKit 媒体缓存）") : tr("应用内缓存已清理"), "ok");
+                toast(tr("缓存已清理"), "ok");
               } catch (error) {
                 setClearError(error instanceof Error ? error.message : String(error || tr("清理失败，请重试")));
               } finally { clearBusy.current = false; setClearing(false); }

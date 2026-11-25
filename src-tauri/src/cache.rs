@@ -6,6 +6,122 @@
 //! without touching login or local preferences.
 
 use serde::Serialize;
+use std::collections::HashMap;
+use std::path::Path;
+
+/// Bounded in-memory cache with automatic LRU eviction on both item count and byte limit.
+pub struct LruCache<V> {
+    entries: HashMap<String, (V, usize, u64)>,
+    total_bytes: usize,
+    max_items: usize,
+    max_bytes: usize,
+    clock: u64,
+}
+
+impl<V> LruCache<V> {
+    pub fn new(max_items: usize, max_bytes: usize) -> Self {
+        Self { entries: HashMap::new(), total_bytes: 0, max_items, max_bytes, clock: 0 }
+    }
+
+    fn tick(&mut self) -> u64 {
+        self.clock = self.clock.wrapping_add(1);
+        self.clock
+    }
+
+    pub fn get(&mut self, key: &str) -> Option<V>
+    where
+        V: Clone,
+    {
+        let next = self.tick();
+        let entry = self.entries.get_mut(key)?;
+        entry.2 = next;
+        Some(entry.0.clone())
+    }
+
+    pub fn insert(&mut self, key: String, value: V, bytes: usize) {
+        if self.max_items == 0 || bytes > self.max_bytes {
+            return;
+        }
+        if let Some((_, old_bytes, _)) = self.entries.remove(&key) {
+            self.total_bytes = self.total_bytes.saturating_sub(old_bytes);
+        }
+        while !self.entries.is_empty()
+            && (self.entries.len() >= self.max_items || self.total_bytes.saturating_add(bytes) > self.max_bytes)
+        {
+            let Some(victim) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, (_, _, ts))| *ts)
+                .map(|(k, _)| k.clone())
+            else {
+                break;
+            };
+            if let Some((_, evicted_bytes, _)) = self.entries.remove(&victim) {
+                self.total_bytes = self.total_bytes.saturating_sub(evicted_bytes);
+            }
+        }
+        let ts = self.tick();
+        self.entries.insert(key, (value, bytes, ts));
+        self.total_bytes = self.total_bytes.saturating_add(bytes);
+    }
+
+    #[cfg(test)]
+    pub fn remove(&mut self, key: &str) {
+        if let Some((_, bytes, _)) = self.entries.remove(key) {
+            self.total_bytes = self.total_bytes.saturating_sub(bytes);
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.total_bytes = 0;
+    }
+
+    pub fn stats(&self) -> (usize, usize, usize) {
+        (self.entries.len(), self.total_bytes, self.max_bytes)
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheStatsReport {
+    pub used_bytes: u64,
+    pub limit_bytes: u64,
+    pub image_count: usize,
+    pub segment_count: usize,
+    pub playlist_count: usize,
+}
+
+fn dir_bytes(dir: &Path) -> u64 {
+    std::fs::read_dir(dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.metadata().ok())
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .sum()
+}
+
+pub fn cache_stats(app: &tauri::AppHandle) -> CacheStatsReport {
+    use tauri::Manager;
+    let (image_count, segment_count, playlist_count, mem_used, limit_bytes) =
+        crate::media::cache_stats();
+    let disk_used = app
+        .path()
+        .app_cache_dir()
+        .ok()
+        .map(|dir| dir_bytes(&dir.join("updates")))
+        .unwrap_or(0);
+    CacheStatsReport {
+        used_bytes: mem_used.saturating_add(disk_used),
+        limit_bytes,
+        image_count,
+        segment_count,
+        playlist_count,
+    }
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

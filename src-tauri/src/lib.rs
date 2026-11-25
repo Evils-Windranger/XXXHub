@@ -265,6 +265,7 @@ pub fn run() {
             api::feed::api_rank,
             api::feed::api_search,
             api::feed::api_search_hot,
+            api::platform::cache_stats,
             api::platform::cache_clear,
             api::feed::api_posts,
             api::feed::api_post,

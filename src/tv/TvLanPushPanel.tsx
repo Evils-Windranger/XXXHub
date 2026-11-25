@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, type InstalledSourceSummary, type LanPushSession, type TvSyncEnvelope } from "../shared/api/api";
 import QrCode from "../shared/ui/QrCode";
-import { TvModal } from "./ui";
 
 type SyncDoneInfo = {
   peer?: string;
@@ -22,14 +21,9 @@ export default function TvLanPushPanel({
   compact?: boolean;
 }) {
   const [session, setSession] = useState<LanPushSession | null>(null);
-  const [manualOpen, setManualOpen] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   const [synced, setSynced] = useState<SyncDoneInfo | null>(null);
   const [startError, setStartError] = useState("");
   const [retryTick, setRetryTick] = useState(0);
-  const fileRef = useRef<HTMLInputElement>(null);
   const lastLegacyRef = useRef<string>("");
   const doneTimerRef = useRef<number>(0);
   const onImportedRef = useRef(onImported);
@@ -107,31 +101,8 @@ export default function TvLanPushPanel({
     };
   }, [retryTick]);
 
-  const submit = async (override?: string) => {
-    const raw = (override ?? draft).trim();
-    if (!raw || busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      const s = await api.sourceImport(raw, true);
-      setDraft("");
-      setManualOpen(false);
-      window.dispatchEvent(new Event("hg:line-changed"));
-      window.dispatchEvent(new Event("hg:source-changed"));
-      onMessageRef.current?.(`已导入 ${s.name} v${s.version}`);
-      onImportedRef.current(s);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setError(msg);
-      onMessageRef.current?.(msg);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
-    <>
-      <div className={`tv-connect-card${compact ? " is-compact" : ""}`}>
+    <div className={`tv-connect-card${compact ? " is-compact" : ""}`}>
         {session?.url && (
           <div className="tv-connect-qr">
             <QrCode value={session.url} size={240} quietZone={2} />
@@ -167,55 +138,14 @@ export default function TvLanPushPanel({
             </div>
           )}
 
-          <div className="tv-options tv-connect-actions" data-tv-region="source-import" data-tv-columns="1">
-            {startError && !session?.url && (
+          {startError && !session?.url && (
+            <div className="tv-options tv-connect-actions" data-tv-region="source-import" data-tv-columns="1">
               <button data-tv-focus="source-retry-lan" onClick={() => setRetryTick((n) => n + 1)}>
                 重试
               </button>
-            )}
-            <button data-tv-focus="source-manual-open" onClick={() => { setError(""); setManualOpen(true); }}>
-              手动输入 / 本地文件
-            </button>
-          </div>
+            </div>
+          )}
         </div>
       </div>
-
-      {manualOpen && (
-        <TvModal id="tv-manual-import" title="手动导入视频源" onClose={() => { if (!busy) setManualOpen(false); }}>
-          <div data-tv-region="manual-import-form" data-tv-columns="1">
-            <input
-              data-tv-focus="source-input"
-              className="tv-lan-input"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="npm:包名 / 链接 / JSON"
-            />
-            {error && <p role="alert" className="tv-lan-error">{error}</p>}
-            <div className="tv-options" style={{ marginTop: 12, padding: 0 }}>
-              <button data-tv-focus="source-import-go" disabled={busy || !draft.trim()} onClick={() => void submit()}>
-                {busy ? "导入中…" : "导入"}
-              </button>
-              <button data-tv-focus="source-file" disabled={busy} onClick={() => fileRef.current?.click()}>
-                本地文件
-              </button>
-              <button data-tv-focus="source-manual-cancel" disabled={busy} onClick={() => setManualOpen(false)}>
-                取消
-              </button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".json,.hgsrc,.txt"
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void f.text().then((t) => void submit(t)).catch(() => setError("读取文件失败"));
-                  e.target.value = "";
-                }}
-              />
-            </div>
-          </div>
-        </TvModal>
-      )}
-    </>
   );
 }

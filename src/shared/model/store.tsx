@@ -95,7 +95,7 @@ type Persist = GuestData & {
 const LS = STORAGE_KEYS.app;
 const DEFAULTS: Persist = {
   likes: [], favs: [], history: [], follows: [],
-  muted: true, muteOnStartup: true, volume: 0.7, searchHist: [], swipeEp: true, preferHevc: false,
+  muted: true, muteOnStartup: true, volume: 0.7, searchHist: [], swipeEp: true, preferHevc: true,
   balanceVolume: false, fsIdleSecs: 3, startupTab: "home", ambientGlow: true,
 };
 
