@@ -6,8 +6,9 @@ import {
 import { useStore } from "../../shared/model/store";
 import { Button, Surface, TextArea } from "../../shared/ui/ios/controls";
 import { Modal, Sheet } from "../../shared/ui/ui";
-import { ICheck, IClose, ILink, IRefresh } from "../../shared/ui/icons";
+import { ICheck, IClose, ILink, IRefresh, IScan } from "../../shared/ui/icons";
 import { tr } from "../../shared/i18n";
+import TvQrSyncModal from "./TvQrSyncModal";
 
 function notifySourceChanged() {
   window.dispatchEvent(new CustomEvent("hg:line-changed"));
@@ -22,6 +23,7 @@ export default function SourceManager({ open, onClose }: { open: boolean; onClos
   const [actionId, setActionId] = useState("");
   const [error, setError] = useState("");
   const [tests, setTests] = useState<Record<string, SourceTestOutcome>>({});
+  const [scanOpen, setScanOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -166,6 +168,7 @@ export default function SourceManager({ open, onClose }: { open: boolean; onClos
           <div className="flex items-center justify-between gap-2">
             <span className="text-[13px] font-semibold text-on">{tr("导入视频源")}</span>
             <div className="flex items-center gap-2">
+              <Button onClick={() => setScanOpen(true)} className="h-7 px-2.5 rounded-(--r-sm) bg-s3 text-[12px] text-on pressable inline-flex items-center gap-1"><IScan size={12} /> {tr("扫码")}</Button>
               <Button onClick={pasteClipboard} className="h-7 px-2.5 rounded-(--r-sm) bg-s3 text-[12px] text-on pressable">{tr("粘贴")}</Button>
               <Button onClick={() => fileRef.current?.click()} className="h-7 px-2.5 rounded-(--r-sm) bg-s3 text-[12px] text-on pressable">{tr("文件")}</Button>
               <input ref={fileRef} type="file" accept=".json,.hgsrc,.txt" className="hidden" onChange={(e) => void onFilePick(e.target.files?.[0])} />
@@ -240,7 +243,12 @@ export default function SourceManager({ open, onClose }: { open: boolean; onClos
     </div>
   );
 
-  return isMobile
-    ? <Sheet open={open} onClose={onClose} label={tr("视频源")}>{body}</Sheet>
-    : <Modal open={open} onClose={onClose} label={tr("视频源")} width={520}>{body}</Modal>;
+  return (
+    <>
+      {isMobile
+        ? <Sheet open={open} onClose={onClose} label={tr("视频源")}>{body}</Sheet>
+        : <Modal open={open} onClose={onClose} label={tr("视频源")} width={520}>{body}</Modal>}
+      <TvQrSyncModal open={scanOpen} onClose={() => setScanOpen(false)} onSuccess={() => { void load(); }} />
+    </>
+  );
 }

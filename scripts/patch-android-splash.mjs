@@ -127,11 +127,12 @@ for (const directory of directories) {
 for (const [path, xml] of pending) writeFileSync(path, xml);
 console.log(`[splash] Android ${themeCount} 个主题背景已对齐 → ${BRAND}（更新 ${pending.size} 个文件）`);
 
-// Also register hghubx://import deep-link intent-filter in AndroidManifest.xml (idempotent).
+// Also register hghubx://import deep-link & CAMERA permission in AndroidManifest.xml (idempotent, standard edition only).
 const manifestPath = join(root, "src-tauri", "gen", "android", "app", "src", "main", "AndroidManifest.xml");
 if (existsSync(manifestPath)) {
   const manifestRaw = readFileSync(manifestPath, "utf8");
-  if (!/android:scheme\s*=\s*["']hghubx["']/.test(manifestRaw)) {
+  let updatedManifest = manifestRaw;
+  if (!/android:scheme\s*=\s*["']hghubx["']/.test(updatedManifest)) {
     const deepLinkFilter = `
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -139,11 +140,17 @@ if (existsSync(manifestPath)) {
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="hghubx" android:host="import" />
             </intent-filter>`;
-    const updatedManifest = manifestRaw.replace(/(<\/activity\s*>)/, `${deepLinkFilter}\n        $1`);
-    if (updatedManifest !== manifestRaw) {
-      writeFileSync(manifestPath, updatedManifest);
-      console.log("[splash] Android 已注册 hghubx://import 深链");
-    }
+    updatedManifest = updatedManifest.replace(/(<\/activity\s*>)/, `${deepLinkFilter}\n        $1`);
+  }
+  if (!/android\.permission\.CAMERA/.test(updatedManifest)) {
+    updatedManifest = updatedManifest.replace(
+      /(<application\b)/,
+      `    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    $1`,
+    );
+  }
+  if (updatedManifest !== manifestRaw) {
+    writeFileSync(manifestPath, updatedManifest);
+    console.log("[splash] Android 已注册 hghubx://import 深链与相机权限");
   }
 }
 

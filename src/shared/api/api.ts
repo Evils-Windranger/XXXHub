@@ -227,6 +227,8 @@ export const api = {
   sourceLanPushStart: () => call<LanPushSession>("source_lan_push_start"),
   sourceLanPushStop: () => call<void>("source_lan_push_stop"),
   sourceLanPushStatus: () => call<LanPushStatus>("source_lan_push_status"),
+  sourceLanPushToTv: (targetUrl: string, includeSource: boolean, sync?: TvSyncData | null) =>
+    call<LanPushClientResult>("source_lan_push_to_tv", { targetUrl, includeSource, sync: sync ?? null }),
 
   /* 更新检查：对比 GitHub Release 的 tag */
   checkUpdate: (opts?: { edition?: "tv"; currentVersion?: string }) =>
@@ -366,10 +368,52 @@ export type LanPushSession = {
   token: string;
 };
 
+export type TvSyncHistoryItem = {
+  id: number;
+  ep: number;
+  t: number;
+  dur: number;
+  at: number;
+};
+
+export type TvSyncContentPrefs = {
+  blockedTags: string[];
+  pinnedTags: string[];
+  paused: boolean;
+  hideUntagged: boolean;
+};
+
+export type TvSyncData = {
+  favs: number[];
+  postFavs: number[];
+  history: TvSyncHistoryItem[];
+  contentPreferences?: TvSyncContentPrefs | null;
+  preferHevc?: boolean | null;
+  autoLine?: boolean | null;
+  lineBase?: string | null;
+};
+
+export type TvSyncEnvelope = {
+  syncId: number;
+  source?: InstalledSourceSummary | null;
+  sync: TvSyncData;
+};
+
+export type LanPushClientResult = {
+  ok: boolean;
+  sourceName?: string | null;
+  sourceVersion?: string | null;
+  syncedFavs: number;
+  syncedPostFavs: number;
+  syncedHistory: number;
+  legacySourceOnly: boolean;
+};
+
 export type LanPushStatus = {
   active: boolean;
   url?: string | null;
   lastImported?: InstalledSourceSummary | null;
+  lastSync?: TvSyncEnvelope | null;
 };
 
 /** `https://a.b/c` → `a.b`（线路展示用） */

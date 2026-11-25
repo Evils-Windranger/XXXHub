@@ -6,6 +6,7 @@ import { Modal, Toggle } from "../../shared/ui/ui";
 import LinePicker from "./LinePicker";
 import ProxySettings from "./ProxySettings";
 import SourceManager from "./SourceManager";
+import TvQrSyncModal from "./TvQrSyncModal";
 import ContentPreferencesSettings from "./ContentPreferencesSettings";
 import SettingsSection from "./SettingsSection";
 import { UsageAgreementText } from "../../shared/ui/UsageAgreement";
@@ -16,7 +17,7 @@ import { formatNetDiag, shortVerdict } from "../../shared/diagnostics/netDiagRep
 import { copyText } from "../../shared/lib/clipboard";
 import { Loader } from "../../shared/ui/ios/effects";
 import { isBalanceVolumeSupported } from "../playback/balanceVolume";
-import { IBack, IBoltF, IBroom, IChevR, ICompress, IGlobe, IHeart, IHome, IInfo, ILink, ILockF, IMoon, IRefresh, ISun, IVol, IVolMute } from "../../shared/ui/icons";
+import { IBack, IBoltF, IBroom, IChevR, ICompress, IGlobe, IHeart, IHome, IInfo, ILink, ILockF, IMoon, IRefresh, IScan, ISun, IVol, IVolMute } from "../../shared/ui/icons";
 import { LOCALE_OPTIONS, N_, setLocale, tr, useLocale, type Locale } from "../../shared/i18n";
 
 const SETTING_GROUPS = [N_("外观"), N_("播放"), N_("内容偏好"), N_("本地数据"), N_("网络"), N_("播放诊断"), N_("其他")] as const;
@@ -33,6 +34,7 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
   const [clearOpen, setClearOpen] = useState(false);
   const [lineOpen, setLineOpen] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
   const [sourceHint, setSourceHint] = useState("");
   const [lineBase, setLineBase] = useState("");
   const [autoLineOn, setAutoLineOn] = useState(autoLineEnabled);
@@ -268,6 +270,13 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
               </div>
               <IChevR size={15} className="text-mut" />
             </Button>
+            <Button onClick={() => setQrOpen(true)} className="ios-settings-row text-left pressable">
+              <span className="ios-setting-icon"><IScan size={16} /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[14px] text-on">{tr("扫码配置 TV")}</div>
+              </div>
+              <IChevR size={15} className="text-mut" />
+            </Button>
             <div className="ios-settings-row">
               <span className="ios-setting-icon"><IRefresh size={15} /></span>
               <div className="flex-1 min-w-0">
@@ -400,6 +409,7 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
 
       <LinePicker open={lineOpen} onClose={() => { setLineOpen(false); readLine(); }} />
       <SourceManager open={sourceOpen} onClose={() => { setSourceOpen(false); readSource(); }} />
+      <TvQrSyncModal open={qrOpen} onClose={() => setQrOpen(false)} onSuccess={readSource} />
 
       <Modal label={tr("使用条款与免责声明")} open={agreementOpen} onClose={() => setAgreementOpen(false)} width={680}>
         <div className="flex flex-col min-h-0 max-h-[78dvh]">

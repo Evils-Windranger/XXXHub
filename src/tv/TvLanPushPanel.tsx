@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { api, type InstalledSourceSummary, type LanPushSession } from "../shared/api/api";
+import { api, type InstalledSourceSummary, type LanPushSession, type TvSyncEnvelope } from "../shared/api/api";
 import QrCode from "../shared/ui/QrCode";
+import { applyTvSyncEnvelope } from "./tvSync";
 
 export default function TvLanPushPanel({
   onImported,
   onMessage,
 }: {
-  onImported: (summary: InstalledSourceSummary) => void;
+  onImported: (summary?: InstalledSourceSummary) => void;
   onMessage?: (msg: string) => void;
 }) {
   const [session, setSession] = useState<LanPushSession | null>(null);
@@ -16,6 +17,7 @@ export default function TvLanPushPanel({
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const lastSeenRef = useRef<string>("");
+  const lastSyncIdRef = useRef<number>(0);
   const onImportedRef = useRef(onImported);
   const onMessageRef = useRef(onMessage);
   onImportedRef.current = onImported;
@@ -23,41 +25,81 @@ export default function TvLanPushPanel({
 
   useEffect(() => {
     let alive = true;
-    let unlisten: (() => void) | null = null;
-    void api.sourceLanPushStart()
-      .then((s) => { if (alive) setSession(s); })
-      .catch(() => {});
+    let unlistenSource: (() => void) | null = null;
+    let unlistenSync: (() => void) | null = null;
 
-    void listen<InstalledSourceSummary>("hg:source-pushed", (e) => {
-      if (!alive || !e.payload) return;
-      const key = `${e.payload.id}@${e.payload.version}:${e.payload.installedAt}`;
+    const markSourceKey = (s: InstalledSourceSummary | null | undefined) => {
+      if (!s) return;
+      lastSeenRef.current = `${s.id}@${s.version}:${s.installedAt}`;
+    };
+
+    const handleSyncEnvelope = async (env: TvSyncEnvelope) => {
+      if (!alive || !env || env.syncId <= lastSyncIdRef.current) return;
+      lastSyncIdRef.current = env.syncId;
+      markSourceKey(env.source);
+      try {
+        const msg = await applyTvSyncEnvelope(env);
+        if (!alive) return;
+        window.dispatchEvent(new Event("hg:line-changed"));
+        window.dispatchEvent(new Event("hg:source-changed"));
+        onMessageRef.current?.(msg);
+      } catch (e) {
+        if (!alive) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg);
+        onMessageRef.current?.(msg);
+      } finally {
+        if (alive) onImportedRef.current(env.source ?? undefined);
+      }
+    };
+
+    const handleLegacySource = (s: InstalledSourceSummary) => {
+      if (!alive) return;
+      const key = `${s.id}@${s.version}:${s.installedAt}`;
       if (lastSeenRef.current === key) return;
       lastSeenRef.current = key;
       window.dispatchEvent(new Event("hg:line-changed"));
       window.dispatchEvent(new Event("hg:source-changed"));
-      onImportedRef.current(e.payload);
+      onMessageRef.current?.(`已导入 ${s.name} v${s.version}`);
+      onImportedRef.current(s);
+    };
+
+    void api.sourceLanPushStart()
+      .then((s) => { if (alive) setSession(s); })
+      .catch(() => {});
+
+    void listen<TvSyncEnvelope>("hg:tv-sync-pushed", (e) => {
+      if (e.payload) void handleSyncEnvelope(e.payload);
     }).then((fn) => {
-      if (alive) unlisten = fn;
+      if (alive) unlistenSync = fn;
+      else fn();
+    }).catch(() => {});
+
+    void listen<InstalledSourceSummary>("hg:source-pushed", (e) => {
+      if (e.payload) handleLegacySource(e.payload);
+    }).then((fn) => {
+      if (alive) unlistenSource = fn;
       else fn();
     }).catch(() => {});
 
     const timer = window.setInterval(() => {
       void api.sourceLanPushStatus().then((st) => {
-        if (!alive || !st.lastImported) return;
-        const s = st.lastImported;
-        const key = `${s.id}@${s.version}:${s.installedAt}`;
-        if (lastSeenRef.current === key) return;
-        lastSeenRef.current = key;
-        window.dispatchEvent(new Event("hg:line-changed"));
-        window.dispatchEvent(new Event("hg:source-changed"));
-        onImportedRef.current(s);
+        if (!alive) return;
+        if (st.lastSync && st.lastSync.syncId > lastSyncIdRef.current) {
+          void handleSyncEnvelope(st.lastSync);
+          return;
+        }
+        if (st.lastImported) {
+          handleLegacySource(st.lastImported);
+        }
       }).catch(() => {});
     }, 2000);
 
     return () => {
       alive = false;
       window.clearInterval(timer);
-      unlisten?.();
+      unlistenSync?.();
+      unlistenSource?.();
       void api.sourceLanPushStop().catch(() => {});
     };
   }, []);
@@ -84,34 +126,24 @@ export default function TvLanPushPanel({
   };
 
   return (
-    <div style={{ display: "flex", gap: 28, alignItems: "flex-start", flexWrap: "wrap" }}>
+    <div className="tv-lan-push">
       {session && (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-          <QrCode value={session.url} size={184} />
-          <div style={{ fontSize: 15, fontWeight: 600 }}>手机扫码推送</div>
-          <code style={{ fontSize: 12, opacity: 0.72, wordBreak: "break-all", maxWidth: 220, textAlign: "center" }}>
-            {session.url}
-          </code>
+        <div className="tv-lan-qr">
+          <QrCode value={session.url} size={220} quietZone={2} />
+          <div className="tv-lan-qr-label">手机扫码配置并同步</div>
+          <code className="tv-lan-url">{session.url}</code>
         </div>
       )}
-      <div style={{ flex: "1 1 300px", minWidth: 280 }} data-tv-region="source-import" data-tv-columns="1">
+      <div className="tv-lan-form" data-tv-region="source-import" data-tv-columns="1">
         <input
           data-tv-focus="source-input"
+          className="tv-lan-input"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="npm:包名 / 链接 / JSON"
-          style={{
-            width: "100%",
-            padding: "11px 14px",
-            borderRadius: 10,
-            background: "rgba(255,255,255,.08)",
-            color: "#fff",
-            border: "1px solid rgba(255,255,255,.16)",
-            marginBottom: 12,
-          }}
         />
-        {error && <p role="alert" style={{ color: "#f87171", marginBottom: 10 }}>{error}</p>}
-        <div className="tv-options">
+        {error && <p role="alert" className="tv-lan-error">{error}</p>}
+        <div className="tv-options tv-lan-actions">
           <button data-tv-focus="source-import-go" disabled={busy || !draft.trim()} onClick={() => void submit()}>
             {busy ? "导入中…" : "导入"}
           </button>

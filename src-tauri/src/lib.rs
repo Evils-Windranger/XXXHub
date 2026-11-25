@@ -300,6 +300,7 @@ pub fn run() {
             source::lan_push::source_lan_push_start,
             source::lan_push::source_lan_push_stop,
             source::lan_push::source_lan_push_status,
+            source::lan_push::source_lan_push_to_tv,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

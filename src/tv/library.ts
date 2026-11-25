@@ -227,3 +227,88 @@ export async function clearHistory(): Promise<void> {
   await completed;
   changed();
 }
+
+export async function mergeSyncedLibrary(input: {
+  favs?: readonly number[];
+  postFavs?: readonly number[];
+  history?: readonly { id: number; ep: number; t: number; dur: number; at: number }[];
+}): Promise<{ favs: number; postFavs: number; history: number }> {
+  const rows = new Map<string, { content: TvContent; favorite: boolean; progress?: TvProgress }>();
+  const ensure = (kind: "video" | "post", id: number) => {
+    const content = legacyContent(kind, id);
+    const key = contentKey(content);
+    let row = rows.get(key);
+    if (!row) {
+      row = { content, favorite: false };
+      rows.set(key, row);
+    }
+    return { key, row };
+  };
+
+  let favs = 0;
+  for (const id of input.favs ?? []) {
+    if (!validId(id)) continue;
+    ensure("video", id).row.favorite = true;
+    favs++;
+  }
+  let postFavs = 0;
+  for (const id of input.postFavs ?? []) {
+    if (!validId(id)) continue;
+    ensure("post", id).row.favorite = true;
+    postFavs++;
+  }
+  let history = 0;
+  for (const h of input.history ?? []) {
+    if (!validId(h.id) || !Number.isSafeInteger(h.ep) || h.ep < 1 ||
+      !Number.isFinite(h.t) || h.t < 0 || !Number.isFinite(h.dur) || h.dur < 0 ||
+      !Number.isFinite(h.at) || h.at < 0) continue;
+    const { key, row } = ensure("video", h.id);
+    const progress: TvProgress = {
+      key,
+      content: metadataOnly(row.content),
+      part: String(h.ep),
+      seconds: h.t,
+      duration: h.dur,
+      updatedAt: h.at,
+    };
+    if (!row.progress || row.progress.updatedAt <= progress.updatedAt) {
+      row.progress = progress;
+    }
+    history++;
+  }
+
+  if (!rows.size) return { favs: 0, postFavs: 0, history: 0 };
+
+  const db = await database();
+  const transaction = db.transaction("library", "readwrite");
+  const completed = done(transaction);
+  const store = transaction.objectStore("library");
+  let failure: unknown;
+  for (const [key, incoming] of rows) {
+    const read = store.get(key);
+    read.onsuccess = () => {
+      try {
+        const old = read.result as TvLibraryEntry | undefined;
+        const content = old?.content ?? incoming.content;
+        const favorite = incoming.favorite || old?.favorite === true;
+        let progress = old?.progress;
+        if (incoming.progress && (!progress || incoming.progress.updatedAt > progress.updatedAt)) {
+          progress = { ...incoming.progress, content: metadataOnly(content) };
+        } else if (progress) {
+          progress = { ...progress, content: metadataOnly(content) };
+        }
+        store.put({ key, content, favorite, ...(progress ? { progress } : {}) });
+      } catch (error) {
+        failure = error;
+        transaction.abort();
+      }
+    };
+  }
+  try {
+    await completed;
+  } catch (error) {
+    throw failure ?? error;
+  }
+  changed();
+  return { favs, postFavs, history };
+}

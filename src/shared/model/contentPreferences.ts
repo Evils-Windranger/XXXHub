@@ -118,6 +118,17 @@ const actions = {
   blockReason(tags: readonly string[] | undefined) { return blockReason(tags, snapshot.preferences); },
 };
 
+export function mergeContentPreferences(incoming: Partial<ContentPreferences> | null | undefined): void {
+  if (!incoming || typeof incoming !== "object") return;
+  const cur = snapshot.preferences;
+  update({
+    blockedTags: Array.isArray(incoming.blockedTags) ? [...cur.blockedTags, ...incoming.blockedTags] : cur.blockedTags,
+    pinnedTags: Array.isArray(incoming.pinnedTags) ? [...cur.pinnedTags, ...incoming.pinnedTags] : cur.pinnedTags,
+    paused: typeof incoming.paused === "boolean" ? incoming.paused : cur.paused,
+    hideUntagged: typeof incoming.hideUntagged === "boolean" ? incoming.hideUntagged : cur.hideUntagged,
+  });
+}
+
 /** A single stable external snapshot keeps settings, cards and the player in sync. */
 export function useContentPreferences() {
   const current = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);

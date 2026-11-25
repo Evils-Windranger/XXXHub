@@ -235,21 +235,32 @@ export function encodeQrMatrix(text: string): boolean[][] {
   return bestMatrix!;
 }
 
-export default function QrCode({ value, size = 188 }: { value: string; size?: number }) {
+export default function QrCode({
+  value,
+  size = 188,
+  className,
+  quietZone = 2,
+}: {
+  value: string;
+  size?: number;
+  className?: string;
+  quietZone?: number;
+}) {
+  const q = Math.max(0, Math.floor(quietZone));
   const { modules, path } = useMemo(() => {
     try {
       const m = encodeQrMatrix(value);
       let d = "";
       for (let r = 0; r < m.length; r++) {
         for (let c = 0; c < m.length; c++) {
-          if (m[r][c]) d += `M${c + 2},${r + 2}h1v1h-1z`;
+          if (m[r][c]) d += `M${c + q},${r + q}h1v1h-1z`;
         }
       }
-      return { modules: m.length + 4, path: d };
+      return { modules: m.length + q * 2, path: d };
     } catch {
       return { modules: 0, path: "" };
     }
-  }, [value]);
+  }, [value, q]);
 
   if (!modules) return null;
   return (
@@ -260,6 +271,7 @@ export default function QrCode({ value, size = 188 }: { value: string; size?: nu
       shapeRendering="crispEdges"
       role="img"
       aria-label={value}
+      className={className}
       style={{ display: "block", borderRadius: 12, background: "#fff" }}
     >
       <rect width={modules} height={modules} fill="#fff" />

@@ -65,9 +65,11 @@ export default function TvApp(){
     {!playing&&<nav className="tv-sidebar" aria-label="主导航" data-tv-region="navigation" data-tv-columns="1"><div className="tv-brand"><Logo size={32}/><span>HGhubX <small>TV</small></span></div>{nav.map(({id,label,Icon})=><button key={id} data-tv-focus={`nav-${id}`} className={id==="settings"?"tv-nav-settings":""} aria-label={id==="settings"&&hasUpdate?`${label}（有新版本）`:label} aria-current={!current&&tab===id?"page":undefined} onClick={()=>navigate(id)}><Icon size={26}/><span>{label}</span>{id==="settings"&&hasUpdate&&<em className="tv-update-dot" aria-hidden="true"/>}</button>)}</nav>}
     <main className="tv-main-area" hidden={!!current}>
       {needsSource&&tab!=="settings"?(
-        <div className="tv-page-scroll" data-tv-scroll-id="page-source-empty" style={{padding:"40px 52px",maxWidth:840}}>
-          <h1 style={{fontSize:26,marginBottom:22}}>导入视频源</h1>
-          <TvLanPushPanel onImported={()=>{void api.sourceState().then(setSourceState).catch(()=>{});}} />
+        <div className="tv-page-scroll tv-source-empty" data-tv-scroll-id="page-source-empty">
+          <div className="tv-source-empty-card">
+            <h1>导入视频源</h1>
+            <TvLanPushPanel onImported={()=>{void api.sourceState().then(setSourceState).catch(()=>{});}} />
+          </div>
         </div>
       ):visited.map(name=><div key={name} hidden={tab!==name} className="tv-page-scroll" data-tv-scroll-id={`page-${name}`}>
         {name==="home"&&<HomePage active={tab==="home"&&!current} onOpen={open}/>}{name==="browse"&&<BrowsePage active={tab==="browse"&&!current} onOpen={open}/>}{name==="search"&&<SearchPage key={tv.sourceKey} source={tv.source} paused={playing||tab!=="search"||!!current} onOpen={open}/>}{name==="library"&&<LibraryPage active={tab==="library"&&!current} onOpen={open}/>}{name==="settings"&&<SettingsPage/>}

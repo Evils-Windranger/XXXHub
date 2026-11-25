@@ -12,9 +12,10 @@ import { Avatar, Empty, Modal } from "../../shared/ui/ui";
 import { MediaCard } from "../../shared/ui/cards";
 import { useContentPreferences } from "../../shared/model/contentPreferences";
 import { CollectionLink, CollectionLinks } from "../../shared/ui/CollectionLink";
-import { IChevR, IClock, IHeart, ILogout, ISettings, IStar, IUser, IUserF, IFilter } from "../../shared/ui/icons";
+import { IChevR, IClock, IHeart, ILogout, IScan, ISettings, IStar, IUser, IUserF, IFilter } from "../../shared/ui/icons";
 import { tr } from "../../shared/i18n";
 import { useTabSwipe } from "../../shared/ui/hooks/useTabSwipe";
+import TvQrSyncModal from "../settings/TvQrSyncModal";
 
 /* Account changes discard cached details synchronously, before another account can paint. */
 export default function Profile({ wide, active = true }: { wide: boolean; active?: boolean }) {
@@ -30,6 +31,7 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
     clearHistory, removeHistory, push, accountSync, syncAccount, accountGeneration,
   } = useStore();
   const [tab, setTab] = useState<"fav" | "history">("fav");
+  const [scanOpen, setScanOpen] = useState(false);
   const [favKind, setFavKind] = useState<"video" | "post">("video");
   const [favFilter, setFavFilter] = useState<FavoriteFilter>("all");
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
@@ -332,10 +334,16 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
       <div className="ios-page-heading shrink-0 flex items-center">
         <h1 className="ios-page-title text-on">{tr("我的")}</h1>
         {isMobile && (
-          <Button onClick={() => push({ kind: "settings" })} aria-label={tr("设置")}
-            className="ios-icon-button ml-auto">
-            <ISettings size={17} strokeWidth={1.7} />
-          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            <Button onClick={() => setScanOpen(true)} aria-label={tr("扫一扫")}
+              className="ios-icon-button">
+              <IScan size={17} strokeWidth={1.7} />
+            </Button>
+            <Button onClick={() => push({ kind: "settings" })} aria-label={tr("设置")}
+              className="ios-icon-button">
+              <ISettings size={17} strokeWidth={1.7} />
+            </Button>
+          </div>
         )}
       </div>
 
@@ -635,6 +643,7 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
           </div>
         </div>
       </Modal>
+      <TvQrSyncModal open={scanOpen} onClose={() => setScanOpen(false)} />
     </div>
   );
 }
