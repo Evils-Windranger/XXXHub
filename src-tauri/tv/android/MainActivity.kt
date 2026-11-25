@@ -24,27 +24,33 @@ class MainActivity : TauriActivity() {
   private var mainWebView: WebView? = null
 
   private fun captureDeepLink(intent: Intent?) {
-    val raw = intent?.dataString ?: return
-    if (raw.startsWith("hghubx://", ignoreCase = true)) {
-      pendingDeepLink = raw
-      deliverDeepLink()
-    }
+    try {
+      val raw = intent?.dataString ?: return
+      if (raw.startsWith("hghubx://", ignoreCase = true)) {
+        pendingDeepLink = raw
+        deliverDeepLink()
+      }
+    } catch (_: Throwable) {}
   }
 
   private fun deliverDeepLink() {
     val link = pendingDeepLink ?: return
     val wv = mainWebView ?: return
-    val quoted = JSONObject.quote(link)
-    val js = "(function(){window.__HG_DEEP_LINK__=" + quoted +
-      ";window.dispatchEvent(new CustomEvent('hg:deep-link',{detail:" + quoted + "}));})();"
-    wv.post { wv.evaluateJavascript(js, null) }
-    for (delay in longArrayOf(400L, 1400L)) {
-      wv.postDelayed({
-        val cur = pendingDeepLink ?: return@postDelayed
-        val q = JSONObject.quote(cur)
-        wv.evaluateJavascript("(function(){if(window.__HG_DEEP_LINK_HANDLED__===" + q + ")return;window.__HG_DEEP_LINK__=" + q + ";window.dispatchEvent(new CustomEvent('hg:deep-link',{detail:" + q + "}));})();", null)
-      }, delay)
-    }
+    try {
+      val quoted = JSONObject.quote(link)
+      val js = "(function(){window.__HG_DEEP_LINK__=" + quoted +
+        ";window.dispatchEvent(new CustomEvent('hg:deep-link',{detail:" + quoted + "}));})();"
+      wv.post { try { wv.evaluateJavascript(js, null) } catch (_: Throwable) {} }
+      for (delay in longArrayOf(400L, 1400L)) {
+        wv.postDelayed({
+          try {
+            val cur = pendingDeepLink ?: return@postDelayed
+            val q = JSONObject.quote(cur)
+            wv.evaluateJavascript("(function(){if(window.__HG_DEEP_LINK_HANDLED__===" + q + ")return;window.__HG_DEEP_LINK__=" + q + ";window.dispatchEvent(new CustomEvent('hg:deep-link',{detail:" + q + "}));})();", null)
+          } catch (_: Throwable) {}
+        }, delay)
+      }
+    } catch (_: Throwable) {}
   }
 
   private fun cachedUpdateFile(): File = File(cacheDir, "updates/hghubx-tv-update.apk")
@@ -147,23 +153,25 @@ class MainActivity : TauriActivity() {
     super.onCreate(savedInstanceState)
     captureDeepLink(intent)
 
-    // Android 15/16 can enforce edge-to-edge. Give the native content container
-    // sole ownership of reported system-bar, cutout and keyboard insets instead
-    // of relying on decor fitting or interpreting a zero cutout as no bars.
-    WindowCompat.setDecorFitsSystemWindows(window, false)
-    val content = findViewById<View>(android.R.id.content)
-    content.fitsSystemWindows = false
-    ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
-      val safe = insets.getInsets(
-        WindowInsetsCompat.Type.systemBars() or
-          WindowInsetsCompat.Type.displayCutout() or
-          WindowInsetsCompat.Type.ime()
-      )
-      view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
-      // The WebView already occupies the fitted content area. Do not expose the
-      // same insets again as CSS safe-area padding inside that smaller viewport.
-      WindowInsetsCompat.CONSUMED
-    }
-    ViewCompat.requestApplyInsets(content)
+    try {
+      // Android 15/16 can enforce edge-to-edge. Give the native content container
+      // sole ownership of reported system-bar, cutout and keyboard insets instead
+      // of relying on decor fitting or interpreting a zero cutout as no bars.
+      WindowCompat.setDecorFitsSystemWindows(window, false)
+      val content = findViewById<View>(android.R.id.content) ?: return
+      content.fitsSystemWindows = false
+      ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
+        val safe = insets.getInsets(
+          WindowInsetsCompat.Type.systemBars() or
+            WindowInsetsCompat.Type.displayCutout() or
+            WindowInsetsCompat.Type.ime()
+        )
+        view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+        // The WebView already occupies the fitted content area. Do not expose the
+        // same insets again as CSS safe-area padding inside that smaller viewport.
+        WindowInsetsCompat.CONSUMED
+      }
+      ViewCompat.requestApplyInsets(content)
+    } catch (_: Throwable) {}
   }
 }

@@ -297,7 +297,7 @@ pub async fn source_lan_push_start(app: AppHandle) -> Result<LanPushSession, Str
     let last_clone = Arc::clone(&last_imported);
     let tok_clone = token.clone();
 
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let deadline = tokio::time::sleep(IDLE_TIMEOUT);
         tokio::pin!(deadline);
         loop {
@@ -309,7 +309,7 @@ pub async fn source_lan_push_start(app: AppHandle) -> Result<LanPushSession, Str
                     let tok = tok_clone.clone();
                     let app_clone = app.clone();
                     let last = Arc::clone(&last_clone);
-                    tokio::spawn(handle_client(stream, tok, app_clone, last));
+                    tauri::async_runtime::spawn(handle_client(stream, tok, app_clone, last));
                 }
             }
         }

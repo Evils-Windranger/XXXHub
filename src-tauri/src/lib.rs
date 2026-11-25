@@ -1,5 +1,6 @@
 mod api;
 mod apple_proxy;
+mod authors;
 mod cache;
 mod env;
 #[cfg(target_os = "ios")]
@@ -105,6 +106,7 @@ pub fn run() {
             let _ = (webview, payload);
         })
         .setup(|app| {
+            #[cfg(desktop)]
             if let Some(link) = std::env::args().skip(1).find(|a| a.starts_with("hghubx://")) {
                 source::commands::set_pending_deep_link(link);
             }
@@ -277,6 +279,7 @@ pub fn run() {
             api::feed::api_user,
             api::feed::api_user_stats,
             api::feed::api_user_videos,
+            authors::api_popular_authors,
             api::video::api_video,
             api::video::api_play,
             api::video::api_comments,
