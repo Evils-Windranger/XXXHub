@@ -76,7 +76,9 @@ try {
           }],
         };
         if (command === "tv_peer_list") return [];
-        if (command === "cache_stats") return { usedBytes: 0, limitBytes: 125829120, imageCount: 0, segmentCount: 0, playlistCount: 0 };
+        if (command === "cache_stats") return { usedBytes: 0, memoryBytes: 0, diskBytes: 0, limitBytes: 134217728, limitMb: 128, unlimited: false, imageCount: 0, segmentCount: 0, playlistCount: 0 };
+        if (command === "cache_set_limit") return { usedBytes: 0, memoryBytes: 0, diskBytes: 0, limitBytes: args.limitMb === 0 ? 0 : (args.limitMb || 128) * 1024 * 1024, limitMb: args.limitMb ?? 128, unlimited: args.limitMb === 0, imageCount: 0, segmentCount: 0, playlistCount: 0 };
+        if (command === "cache_clear") return { webCache: true, platform: "linux", freedBytes: 0, remainingBytes: 0 };
         if (command === "api_me") return { user, interactions, origin: fixture.base };
         if (command === "api_account_history") return { items: [], pagination: { page: args.page, pages: 1, size: args.size, total: 0 } };
         if (command === "debug_log" || command === "playback_log_write" || command === "line_cancel") return;

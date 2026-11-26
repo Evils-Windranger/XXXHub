@@ -38,8 +38,8 @@
   `rebase_or_clear()`、`reconcile_on_boot()`、
   `set_if_revision()`、`is_current()`、`update_user_if_current()`、`clear_if_current()`、`persist()`。
 - 清缓存与缓存统计：[`src-tauri/src/api/platform.rs`](../../src-tauri/src/api/platform.rs) 的
-  `cache_stats`、`cache_clear`；[`src-tauri/src/cache.rs`](../../src-tauri/src/cache.rs) 的
-  `LruCache`、`CacheStatsReport`、`cache_stats()`、`CacheClearReport`、`clear_web_cache()`、`safe_cache_types()`。
+  `cache_stats`、`cache_clear`、`cache_set_limit`；[`src-tauri/src/cache.rs`](../../src-tauri/src/cache.rs) 的
+  `LruCache`、`CacheStatsReport`、`CacheClearReport`、`bind()`、`set_limit_mb()`、`cache_stats()`、`clear_all()`、`safe_cache_types()`。
 - 账号同步与批量收藏回归：[`scripts/test-account-sync-empty-state.mjs`](../../scripts/test-account-sync-empty-state.mjs)，
   由 `scripts/test-smoke.mjs` 的最后一项 `account-sync` 调用；界面未知态见
   [`src/features/account/Profile.tsx`](../../src/features/account/Profile.tsx) 的 `favoriteStateUnknown`。
@@ -66,7 +66,7 @@
 | `CREDENTIAL_KEY`（`hghubx_credential_v1`） | — | 登录/注册成功时保存的 `{username, password, userId, origin}`，仅用于同账号 401 后的静默重登；无归属的旧值不用于重登 |
 
 应用数据目录还保存 `session.json`（会话）、`line.json`（v2 线路）、`proxy.json`（代理）、
-`security.json`（严格模式）和可选的 `playback-diagnostics.json`（诊断开关）；它们由 Rust
+`security.json`（严格模式）、`cache.json`（缓存上限档位，默认 `128` MB，`0` 表示无上限）和可选的 `playback-diagnostics.json`（诊断开关）；它们由 Rust
 对应的 `bind()`/`set()` 管理，不经过 `localStorage`。
 
 1. `readStorage(key)` 先读新键。新键存在时尝试删除对应旧键；删除失败只留到下次启动重试，不影响
@@ -100,7 +100,7 @@
 7. `SessionStore` 把 `{origin, token, user, revision}` 写入应用数据目录的 `session.json`。
    旧版本没有 `origin`，反序列化后 `token()`/`snapshot()` 不会把它分配给当前线路，升级后必须
    重新登录。`revision` 是进程内代次，不落盘；同 token 重新登录也会推进 revision。
-8. 媒体内存缓存（封面 48 MB / 240 条、分片 64 MB / 36 条、Key 4 MB / 120 条、播放列表 4 MB / 60 条，总上限 120 MB）由 [`src-tauri/src/cache.rs`](../../src-tauri/src/cache.rs) 的 `LruCache` 按条数与字节上限自动淘汰较早条目，`cache_stats` 返回当前内存缓存与 `updates` 目录占用及上限。`cache_clear` 先清 `media::clear_caches()`，再由 `clear_web_cache()` 清平台 WebView 缓存。Linux 只清 `MEMORY_CACHE`、`DISK_CACHE`、`OFFLINE_APPLICATION_CACHE`，明确排除 cookies、localStorage、sessionStorage、IndexedDB、service worker 和 HSTS；其他平台不调用 `clear_all_browsing_data`，只清应用内缓存并保留登录与偏好。标准版与 TV 端默认开启自动选线与优先高清（`preferHevc: true` / `quality: "hevc"`）。
+8. 媒体内存缓存与磁盘缓存上限由 [`src-tauri/src/cache.rs`](../../src-tauri/src/cache.rs) 的 `cache.json`（可选档位 `128 MB`/`256 MB`/`512 MB`/`1 GB`/`无上限`，默认 `128 MB`；`limitMb=0` 时 `LruCache` 不按字节或条数自动淘汰）控制，调低上限时立即按 LRU 淘汰多余条目。`cache_stats` 返回真实内存缓存与各平台纯缓存目录占用（Windows 仅统计 `updates/` 及 `EBWebView/Default/{Cache/Cache_Data,Code Cache,GPUCache}`，不计入也不触碰同目录下的 `Local Storage`、`Cookies` 等）。`cache_clear` 先清空 `media::clear_caches()` 与 `CacheStorage`（及 Android `WebView.clearCache(true)` 原生桥），再按平台选择性清理磁盘与系统 HTTP/媒体缓存（Linux 为 WebKitGTK `MEMORY_CACHE | DISK_CACHE | OFFLINE_APPLICATION_CACHE`，macOS/iOS 为 `NSURLCache` 与 `Library/Caches`，Windows 仅清 WebView2 `Cache_Data`/`Code Cache`/`GPUCache`，Android 跳过实时 `WebView/` 目录交由原生 `clearCache(true)` 处理），返回真实 `freedBytes` 与 `remainingBytes`。视频源剪贴板粘贴经 [`src/shared/lib/clipboard.ts`](../../src/shared/lib/clipboard.ts) 的 `pasteText()` 优先调用 `clipboard-manager:allow-read-text`。每次启动及返回前台（60 秒冷却）时由 [`src/shared/model/sourceAutoUpdate.ts`](../../src/shared/model/sourceAutoUpdate.ts) 静默检查并应用带 `updateUrls` 视频源的新版本。标准版与 TV 端默认开启自动选线与优先高清（`preferHevc: true` / `quality: "hevc"`）。
 
 ## 状态转换
 
@@ -151,7 +151,7 @@
   可信镜像时改写 origin（revision 递增并落盘），否则切线路仍 `SessionStore.clear()`。
   旧 `session.json` 没有 origin 时不得猜归属，也不参与 rebase。
 - 清缓存不能调用 `clear_all_browsing_data`；它会连 cookies/localStorage 一起删，导致登录和
-  偏好丢失。非 Linux 平台宁可只清内存缓存，也不做全量清理。
+  偏好丢失。各平台仅清理已知纯缓存类或子目录（Windows 尤其不可清空整个 `%LOCALAPPDATA%` 根目录）。
 - 本地写入失败要可见（偏好提示、账号 `sync.error`），不能静默显示“已保存”。
 - 日志和错误提示不输出 token、账号 ID、收藏内容或完整存储值。
 - `CREDENTIAL_KEY` 保存在本机 WebView，只供静默重登使用。密码仅经 `api_login` 发送到校验过的登录接口，

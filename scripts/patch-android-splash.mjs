@@ -193,6 +193,9 @@ import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
@@ -201,6 +204,41 @@ class MainActivity : TauriActivity() {
   private var imeBottom = 0
   private var webViewHooked = false
   @Volatile private var pendingDeepLink: String? = null
+
+  private fun dirBytes(file: File?, depth: Int = 0): Long {
+    if (file == null || depth > 8) return 0L
+    val list = file.listFiles() ?: return if (file.isFile) file.length() else 0L
+    var total = 0L
+    for (child in list) {
+      if (child.isDirectory) total += dirBytes(child, depth + 1)
+      else if (child.isFile) total += child.length()
+    }
+    return total
+  }
+
+  private inner class CacheBridge(private val webView: WebView) {
+    @JavascriptInterface
+    fun clearWebCache(): Long {
+      return try {
+        val root = cacheDir
+        val before = dirBytes(root)
+        val latch = CountDownLatch(1)
+        webView.post {
+          try {
+            webView.clearCache(true)
+          } finally {
+            latch.countDown()
+          }
+        }
+        latch.await(3, TimeUnit.SECONDS)
+        try { Thread.sleep(180) } catch (_: InterruptedException) {}
+        val after = dirBytes(root)
+        (before - after).coerceAtLeast(0L)
+      } catch (_: Throwable) {
+        -1L
+      }
+    }
+  }
 
   private class HapticBridge(private val context: Context) {
     @Suppress("DEPRECATION")
@@ -224,6 +262,14 @@ class MainActivity : TauriActivity() {
         }
       } catch (_: Throwable) {}
     }
+  }
+
+  override fun onWebViewCreate(webView: WebView) {
+    super.onWebViewCreate(webView)
+    try {
+      webView.addJavascriptInterface(HapticBridge(applicationContext), "__HG_HAPTIC__")
+      webView.addJavascriptInterface(CacheBridge(webView), "__HG_CACHE__")
+    } catch (_: Throwable) {}
   }
 
   private fun findWebView(view: View?): WebView? {
@@ -288,6 +334,7 @@ class MainActivity : TauriActivity() {
       webViewHooked = true
       try {
         wv.addJavascriptInterface(HapticBridge(applicationContext), "__HG_HAPTIC__")
+        wv.addJavascriptInterface(CacheBridge(wv), "__HG_CACHE__")
       } catch (_: Throwable) {}
       for (delay in longArrayOf(150L, 600L, 1500L)) {
         wv.postDelayed({ pushInsets(content) }, delay)
@@ -339,6 +386,7 @@ class MainActivity : TauriActivity() {
   const previousPatchedHashes = new Set([
     "52a0435284e8cd76196b4e73ab2f8394f041675f7736af31e6c083aae4e72c31",
     "fd5f83e7377db5344964105d5a5eeaf332c598080ac1820c07e596c65b9f60e4",
+    "875364ca6c68491074b33fb2eb1f222432d312c432a90972e949d0f0b2a76a92",
   ]);
   if (![templateActivity, patchedActivity].some((expected) => normalize(expected) === normalized) &&
       !previousPatchedHashes.has(createHash("sha256").update(normalized).digest("hex"))) {

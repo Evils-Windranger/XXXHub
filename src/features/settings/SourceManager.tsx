@@ -8,6 +8,7 @@ import { Button, Surface, TextArea } from "../../shared/ui/ios/controls";
 import { Modal, Sheet } from "../../shared/ui/ui";
 import { ICheck, IClose, ILink, IRefresh, IScan } from "../../shared/ui/icons";
 import { tr } from "../../shared/i18n";
+import { pasteText } from "../../shared/lib/clipboard";
 import TvQrSyncModal from "./TvQrSyncModal";
 
 function notifySourceChanged() {
@@ -60,8 +61,9 @@ export default function SourceManager({ open, onClose }: { open: boolean; onClos
 
   const pasteClipboard = async () => {
     try {
-      const text = await navigator.clipboard.readText();
-      if (text) setDraft(text.trim());
+      const text = (await pasteText()).trim();
+      if (text) setDraft(text);
+      else toast(tr("剪贴板为空"), "info");
     } catch {
       toast(tr("读取剪贴板失败，请手动粘贴"), "info");
     }
@@ -177,7 +179,6 @@ export default function SourceManager({ open, onClose }: { open: boolean; onClos
           </div>
           <TextArea
             aria-label={tr("导入视频源")}
-            placeholder={tr("链接 / hghubx-src:// 口令 / JSON")}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             className="w-full h-20 p-2.5 rounded-(--r-sm) bg-s3 text-[12px] text-on font-mono resize-none"

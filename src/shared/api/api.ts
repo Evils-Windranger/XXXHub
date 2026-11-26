@@ -112,6 +112,29 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 
 /* ── 接口 ───────────────────────────────────────────────── */
 
+export type CacheStatsReport = {
+  usedBytes: number;
+  memoryBytes?: number;
+  diskBytes?: number;
+  limitBytes: number;
+  limitMb?: number;
+  unlimited?: boolean;
+  imageCount: number;
+  segmentCount: number;
+  playlistCount: number;
+};
+
+export type CacheClearReport = {
+  webCache: boolean;
+  platform: string;
+  freedBytes?: number;
+  remainingBytes?: number;
+};
+
+type WindowWithCacheBridge = Window & {
+  __HG_CACHE__?: { clearWebCache?: () => number };
+};
+
 export const api = {
   boot: () =>
     call<{
@@ -173,8 +196,31 @@ export const api = {
   commentSend: (id: number, ep: number, text: string, replyId?: number) =>
     call<unknown>("api_comment_send", { id, ep, text, replyId: replyId ?? null }),
 
-  cacheStats: () => invoke<{ usedBytes: number; limitBytes: number; imageCount: number; segmentCount: number; playlistCount: number }>("cache_stats"),
-  clearCache: () => invoke<{ webCache: boolean; platform: string }>("cache_clear"),
+  cacheStats: () => invoke<CacheStatsReport>("cache_stats"),
+  setCacheLimit: (limitMb: number) => invoke<CacheStatsReport>("cache_set_limit", { limitMb }),
+  clearCache: async (): Promise<CacheClearReport> => {
+    let nativeCleared = false;
+    let nativeFreed = 0;
+    try {
+      const res = (window as WindowWithCacheBridge).__HG_CACHE__?.clearWebCache?.();
+      if (typeof res === "number" && res >= 0) {
+        nativeCleared = true;
+        nativeFreed = res;
+      }
+    } catch { /* ignore */ }
+    try {
+      if (typeof caches !== "undefined" && typeof caches.keys === "function") {
+        const names = await caches.keys();
+        await Promise.all(names.map((name) => caches.delete(name)));
+      }
+    } catch { /* ignore */ }
+    const report = await invoke<CacheClearReport>("cache_clear");
+    return {
+      ...report,
+      webCache: Boolean(report?.webCache || nativeCleared),
+      freedBytes: (typeof report?.freedBytes === "number" ? report.freedBytes : 0) + nativeFreed,
+    };
+  },
   netDiag: () => invoke<Record<string, unknown>>("net_diag"),
   postLike: (id: number, on: boolean, identity?: AccountIdentity) => call<unknown>("api_post_like", { id, on, expectedUserId: identity?.expectedUserId, expectedOrigin: identity?.expectedOrigin }),
   postCollect: (id: number, on: boolean, identity?: AccountIdentity) => call<unknown>("api_post_collect", { id, on, expectedUserId: identity?.expectedUserId, expectedOrigin: identity?.expectedOrigin }),

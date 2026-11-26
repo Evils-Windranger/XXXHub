@@ -48,7 +48,9 @@ export function installTvFixture({ accepted = false, legacy, contentPreferences,
       if (command === "line_health") return { base: fixture.base, ok: true, ms: 1, status: 200 };
       if (command === "proxy_state") return { mode: "off", url: "", effective: null, system_proxy: false, env_proxy: false };
       if (command === "proxy_set") return { mode: args.mode, url: "", effective: null, system_proxy: false, env_proxy: false };
-      if (command === "cache_clear") return { webCache: true, platform: "android" };
+      if (command === "cache_stats") return { usedBytes: 0, memoryBytes: 0, diskBytes: 0, limitBytes: 134217728, limitMb: 128, unlimited: false, imageCount: 0, segmentCount: 0, playlistCount: 0 };
+      if (command === "cache_set_limit") return { usedBytes: 0, memoryBytes: 0, diskBytes: 0, limitBytes: args.limitMb === 0 ? 0 : (args.limitMb || 128) * 1024 * 1024, limitMb: args.limitMb ?? 128, unlimited: args.limitMb === 0, imageCount: 0, segmentCount: 0, playlistCount: 0 };
+      if (command === "cache_clear") return { webCache: true, platform: "android", freedBytes: 0, remainingBytes: 0 };
       if (command === "check_update") {
         const cur = args.currentVersion || "2.2.3";
         return fixture.updateInfo || { current: cur, latest: cur, tag: `tv-v${cur}`, has_update: false, asset: null, url: "https://github.com/zxsos/HGhubX/releases" };
@@ -132,6 +134,7 @@ export function installTvFixture({ accepted = false, legacy, contentPreferences,
         }],
       };
       if (command === "source_take_deep_link") return null;
+      if (command === "source_check_update") return { updated: false, fromVersion: "1.0.0", toVersion: "1.0.0", summary: null };
       if (command === "tv_peer_start") return { url: "", ip: "127.0.0.1", port: 0, token: "" };
       if (command === "source_lan_push_status") return { active: false, pairing: false, url: null, code: null, lastImported: null, lastSync: null };
       if (command === "plugin:event|listen") return 0;

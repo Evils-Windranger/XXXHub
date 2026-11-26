@@ -251,8 +251,15 @@ pub async fn source_check_update(id: String) -> Result<SourceUpdateOutcome, Stri
                     last_err = format!("新版视频源初始化失败，已保留旧版：{e}");
                     continue;
                 }
+                let origins_changed = current.manifest.network.origins != candidate.manifest.network.origins;
                 let to_version = candidate.manifest.version.clone();
                 let summary = store.install(candidate, sig_info, false)?;
+                if summary.active {
+                    crate::media::clear_caches();
+                    if origins_changed || crate::net::base().is_empty() {
+                        crate::net::sync_base_for_source(&active_default_origin());
+                    }
+                }
                 return Ok(SourceUpdateOutcome {
                     updated: true,
                     from_version,

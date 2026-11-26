@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { api, APP_VERSION, hostOf, type LineState, type LineItem, type PairedPeerSummary, type ProxyState, type SourceStateSnapshot } from "../shared/api/api";
+import { api, APP_VERSION, hostOf, type CacheStatsReport, type LineState, type LineItem, type PairedPeerSummary, type ProxyState, type SourceStateSnapshot } from "../shared/api/api";
 import { autoLineEnabled, setAutoLine, pickLine } from "../shared/network/autoLine";
 import { useContentPreferences } from "../shared/model/contentPreferences";
 import { UsageAgreementText } from "../shared/ui/UsageAgreement";
@@ -23,6 +23,15 @@ import {
 } from "./updater";
 
 const groups=["播放偏好","画面边距","启动密码","标签屏蔽","手机同步","视频源","线路","网络","缓存","关于"];
+const CACHE_LIMIT_TIERS = [128, 256, 512, 1024, 0] as const;
+const formatLimit = (mb: number) => mb === 0 ? "无上限" : mb >= 1024 && mb % 1024 === 0 ? `${mb / 1024} GB` : `${mb} MB`;
+const formatCacheBytes = (bytes: number) => bytes >= 1024 * 1024 * 1024
+  ? `${(bytes / (1024 * 1024 * 1024)).toFixed(2).replace(/\.0+$/, "")} GB`
+  : bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`
+    : bytes >= 1024
+      ? `${Math.round(bytes / 1024)} KB`
+      : bytes > 0 ? "< 1 KB" : "0 KB";
 
 function formatSyncTime(ts: number) {
   if (!ts) return "";
@@ -41,7 +50,7 @@ export default function SettingsPage(){
   const [lines,setLines]=useState<LineState|null>(null),[proxy,setProxy]=useState<ProxyState|null>(null),[auto,setAuto]=useState(autoLineEnabled);
   const [sources,setSources]=useState<SourceStateSnapshot|null>(null);
   const [peers,setPeers]=useState<PairedPeerSummary[]>([]);
-  const [cacheInfo,setCacheInfo]=useState<{usedBytes:number;limitBytes:number}|null>(null);
+  const [cacheInfo,setCacheInfo]=useState<CacheStatsReport|null>(null);
   const [mirrors,setMirrors]=useState<LineItem[]>([]),[mirrorError,setMirrorError]=useState("");
   const operation = useRef(false);
   const preferences=useContentPreferences(),display=useTvDisplay(),playback=usePlaybackPreferences(),pin=useTvPin(),updater=useTvUpdater();
@@ -59,7 +68,8 @@ export default function SettingsPage(){
   const readMirrors=async()=>{if(!allowLines)return;setMirrorError("");try{const result=await api.lineMirrors();setMirrors(result.items);}catch(e){setMirrorError(String(e));}};
   const refreshSources=()=>{void api.sourceState().then(setSources).catch(()=>{});};
   const refreshPeers=()=>{void api.tvPeerList().then(setPeers).catch(()=>{});};
-  const refreshCache=()=>{void api.cacheStats().then(s=>{if(s&&typeof s.usedBytes==="number")setCacheInfo(s);}).catch(()=>{});};
+  const refreshCache=()=>api.cacheStats().then(s=>{if(s&&typeof s.usedBytes==="number")setCacheInfo(s);}).catch(()=>{});
+  const cacheLimitMb = cacheInfo ? (cacheInfo.unlimited || cacheInfo.limitMb === 0 ? 0 : (cacheInfo.limitMb ?? Math.round(cacheInfo.limitBytes / (1024 * 1024)))) : 128;
   useEffect(()=>{
     if(group==="线路"&&allowLines)void readMirrors();
     if(group==="视频源")refreshSources();
@@ -140,7 +150,14 @@ export default function SettingsPage(){
       </>}
       {group==="线路"&&allowLines&&<><p>当前：{lines?(hostOf(lines.base)||"未设置"):"正在读取"}</p><div data-tv-region="line-options" data-tv-columns="1"><button disabled={busy} role="switch" aria-checked={auto} data-tv-focus="auto-line" onClick={()=>void run(async()=>{await setAutoLine(!auto);setAuto(!auto);})}>自动选线：{auto?"开启":"关闭"}</button><button data-tv-focus="pick-line" disabled={busy||!auto} onClick={()=>void run(async()=>{await pickLine("tv-settings",true);setLines(await api.lineState());})}>重新检测可用线路</button>{mirrorError&&<p role="status">{mirrorError}</p>}<button data-tv-focus="refresh-mirrors" disabled={busy} onClick={()=>void run(readMirrors,"镜像线路已更新")}>刷新镜像线路</button>{availableLines.map(line=><button key={line.url} data-tv-focus={`line-${line.url}`} role="radio" aria-checked={lines?.base===line.url} disabled={busy} onClick={()=>void run(async()=>{await setAutoLine(false);setAuto(false);await api.lineSet(line.url);window.dispatchEvent(new Event("hg:line-changed"));setLines(await api.lineState());})}>{line.name||hostOf(line.url)}</button>)}</div></>}
       {group==="网络"&&<><p>使用电视系统代理，或直接连接。网络设置影响当前应用。</p><div data-tv-region="proxy-options" data-tv-columns="1">{(["system","off"] as const).map(mode=><button key={mode} disabled={busy} role="radio" aria-checked={proxy?.mode===mode} data-tv-focus={`proxy-${mode}`} onClick={()=>void run(async()=>{setProxy(await api.proxySet(mode,""));window.dispatchEvent(new Event("hg:proxy-changed"));})}>{mode==="system"?"跟随系统代理":"直连"}</button>)}</div></>}
-      {group==="缓存"&&<><p>{cacheInfo&&cacheInfo.usedBytes>0?`当前已缓存约 ${formatApkSize(cacheInfo.usedBytes)}，`:""}超过 {Math.round((cacheInfo?.limitBytes??120*1024*1024)/(1024*1024))} MB 时会自动清理较早缓存。手动清理不会影响本地片库、同步记录与偏好设置。</p><button data-tv-focus="clear-cache" disabled={busy} onClick={()=>void run(async()=>{await api.clearCache();resetCachedTvUpdate();refreshCache();},"缓存已清理，片库和偏好已保留")}>清理缓存</button></>}
+      {group==="缓存"&&<>
+        <p>{cacheInfo&&cacheInfo.usedBytes>0?`当前已缓存 ${formatCacheBytes(cacheInfo.usedBytes)} · `:"当前无缓存占用 · "}上限：{formatLimit(cacheLimitMb)}{cacheLimitMb===0?"（不自动淘汰）":"（超出后自动淘汰较早缓存）"}。手动清理不会影响本地片库、同步记录与偏好设置。</p>
+        <h3>缓存上限</h3>
+        <div className="tv-options" data-tv-region="cache-limit">
+          {CACHE_LIMIT_TIERS.map(mb=><button key={mb} role="radio" aria-checked={cacheLimitMb===mb} data-tv-focus={`cache-limit-${mb}`} disabled={busy} onClick={()=>void run(async()=>{setCacheInfo(await api.setCacheLimit(mb));},mb===0?"缓存上限已设为无上限":`缓存上限已设为 ${formatLimit(mb)}`)}>{formatLimit(mb)}</button>)}
+        </div>
+        <button data-tv-focus="clear-cache" disabled={busy} onClick={()=>void run(async()=>{const res=await api.clearCache();resetCachedTvUpdate();await refreshCache();setMessage(res.freedBytes&&res.freedBytes>0?`缓存已清理（释放 ${formatCacheBytes(res.freedBytes)}），片库和偏好已保留`:"缓存已清理，片库和偏好已保留");},"")}>清理缓存</button>
+      </>}
       {group==="关于"&&<><h3>HGhubX TV {APP_VERSION}</h3>
         <div className="tv-update-card">
           {updater.status==="idle"&&<p>支持电视端应用内一键更新（内置加速节点自动回退与 SHA-256 完整性校验）。</p>}

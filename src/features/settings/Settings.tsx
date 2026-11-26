@@ -1,6 +1,6 @@
 import { Button, SegmentedControl, Surface, TextArea } from "../../shared/ui/ios/controls";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api, APP_VERSION, hostOf, isMobile, logLine, platform, type UpdateInfo } from "../../shared/api/api";
+import { api, APP_VERSION, hostOf, isMobile, logLine, platform, type CacheStatsReport, type UpdateInfo } from "../../shared/api/api";
 import { useStore } from "../../shared/model/store";
 import { Modal, Toggle } from "../../shared/ui/ui";
 import LinePicker from "./LinePicker";
@@ -23,6 +23,7 @@ import { LOCALE_OPTIONS, N_, setLocale, tr, useLocale, type Locale } from "../..
 
 const SETTING_GROUPS = [N_("外观"), N_("播放"), N_("内容偏好"), N_("本地数据"), N_("网络"), N_("播放诊断"), N_("其他")] as const;
 type SettingGroup = typeof SETTING_GROUPS[number];
+const CACHE_LIMIT_TIERS = [128, 256, 512, 1024, 0] as const;
 
 /* 独立设置页：线路 / 外观 / 播放 / 本地数据 / 清理缓存 / 网络诊断 / 关于
    入口：Windows 侧栏「设置」、Android「我的」右上角齿轮 */
@@ -51,7 +52,8 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
   const [autoLineOn, setAutoLineOn] = useState(autoLineEnabled);
   const clearBusy = useRef(false);
   const [clearError, setClearError] = useState("");
-  const [cacheInfo, setCacheInfo] = useState<{ usedBytes: number; limitBytes: number } | null>(null);
+  const [cacheInfo, setCacheInfo] = useState<CacheStatsReport | null>(null);
+  const [cacheSavingLimit, setCacheSavingLimit] = useState(false);
   const [lineError, setLineError] = useState("");
   const [clearing, setClearing] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -93,11 +95,24 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
   const refreshPeers = () => {
     void api.tvPeerList().then((list) => setPairedCount(list.length)).catch(() => {});
   };
-  const readCache = () => { void api.cacheStats().then((s) => { if (s && typeof s.usedBytes === "number") setCacheInfo(s); }).catch(() => {}); };
-  const formatCacheBytes = (bytes: number) => bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB` : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : "0 KB";
-  const cacheLimitMb = Math.round((cacheInfo?.limitBytes ?? 120 * 1024 * 1024) / (1024 * 1024));
+  const readCache = () =>
+    api.cacheStats().then((s) => { if (s && typeof s.usedBytes === "number") setCacheInfo(s); }).catch(() => {});
+  const formatCacheBytes = (bytes: number) => {
+    if (bytes >= 1024 * 1024 * 1024) {
+      return `${(bytes / (1024 * 1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 * 1024 ? 1 : 2).replace(/\.0+$/, "")} GB`;
+    }
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+    return bytes > 0 ? "< 1 KB" : "0 KB";
+  };
+  const formatCacheLimitLabel = (mb: number) =>
+    mb === 0 ? tr("无上限") : mb >= 1024 && mb % 1024 === 0 ? `${mb / 1024} GB` : `${mb} MB`;
+  const cacheLimitMb = cacheInfo
+    ? (cacheInfo.unlimited || cacheInfo.limitMb === 0 ? 0 : (cacheInfo.limitMb ?? Math.round(cacheInfo.limitBytes / (1024 * 1024))))
+    : 128;
+  const cacheUnlimited = cacheLimitMb === 0;
   useEffect(() => {
-    const sync = () => { if (capabilities.lines) readLine(); readSource(); refreshPeers(); readCache(); setAutoLineOn(autoLineEnabled()); };
+    const sync = () => { if (capabilities.lines) readLine(); readSource(); refreshPeers(); void readCache(); setAutoLineOn(autoLineEnabled()); };
     sync();
     window.addEventListener("hg:line-changed", sync);
     window.addEventListener("hg:auto-line-changed", sync);
@@ -279,13 +294,47 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
                 <div className="text-[12px] text-mut">{tr("{0} 部收藏 · {1} 条观看记录", favs.length, history.length)}</div>
               </div>
             </div>
-            <Button onClick={() => { setClearError(""); readCache(); setClearOpen(true); }} className="ios-settings-row text-left pressable">
+            <div className="ios-settings-row flex-wrap">
+              <span className="ios-setting-icon"><ICompress size={16} /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[14px] text-on">{tr("缓存上限")}</div>
+                <div className="text-[12px] text-mut">{cacheUnlimited
+                  ? tr("当前不限制缓存大小，建议空间充足时使用")
+                  : tr("超出 {0} 后自动淘汰较早缓存", formatCacheLimitLabel(cacheLimitMb))}</div>
+              </div>
+              <SegmentedControl className="w-full" aria-label={tr("缓存上限")}
+                activeIndex={CACHE_LIMIT_TIERS.indexOf(cacheLimitMb as typeof CACHE_LIMIT_TIERS[number])}>
+                {CACHE_LIMIT_TIERS.map((mb) => (
+                  <Button key={mb} type="button" disabled={cacheSavingLimit} aria-pressed={cacheLimitMb === mb}
+                    onClick={() => {
+                      if (cacheSavingLimit || cacheLimitMb === mb) return;
+                      setCacheSavingLimit(true);
+                      void api.setCacheLimit(mb)
+                        .then((next) => {
+                          setCacheInfo(next);
+                          toast(mb === 0
+                            ? tr("缓存上限已设为无上限")
+                            : tr("缓存上限已设为 {0}", formatCacheLimitLabel(mb)), "ok");
+                        })
+                        .catch((e) => toast(e instanceof Error ? e.message : tr("保存失败，请重试"), "info"))
+                        .finally(() => setCacheSavingLimit(false));
+                    }}>
+                    {formatCacheLimitLabel(mb)}
+                  </Button>
+                ))}
+              </SegmentedControl>
+            </div>
+            <Button onClick={() => { setClearError(""); void readCache(); setClearOpen(true); }} className="ios-settings-row text-left pressable">
               <span className="ios-setting-icon"><IBroom size={16} /></span>
               <div className="flex-1 min-w-0">
                 <div className="text-[14px] text-on">{tr("清理缓存")}</div>
                 <div className="text-[12px] text-mut">{cacheInfo && cacheInfo.usedBytes > 0
-                  ? tr("当前约 {0} · 超过 {1} MB 自动清理旧缓存", formatCacheBytes(cacheInfo.usedBytes), cacheLimitMb)
-                  : tr("超过 {0} MB 时自动清理旧缓存", cacheLimitMb)}</div>
+                  ? (cacheUnlimited
+                      ? tr("当前已占用 {0} · 无上限", formatCacheBytes(cacheInfo.usedBytes))
+                      : tr("当前已占用 {0} / {1}", formatCacheBytes(cacheInfo.usedBytes), formatCacheLimitLabel(cacheLimitMb)))
+                  : (cacheUnlimited
+                      ? tr("当前无缓存占用 · 上限无上限")
+                      : tr("当前无缓存占用 · 上限 {0}", formatCacheLimitLabel(cacheLimitMb)))}</div>
               </div>
               <IChevR size={15} className="text-mut" />
             </Button>
@@ -523,9 +572,9 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
         <div className="p-5">
           <div className="text-[15px] font-bold text-on">{tr("清理缓存")}</div>
           <p className="text-[13px] text-mut leading-relaxed mt-2">
-            {platform === "linux"
-              ? tr("清理已缓存的图片、视频缓冲与媒体临时文件，释放占用空间。超过 {0} MB 时也会自动清理较早缓存；登录状态、收藏、观看记录与设置均会保留。", cacheLimitMb)
-              : tr("清理已缓存的图片与视频缓冲数据，释放占用空间。超过 {0} MB 时也会自动清理较早缓存；登录状态、收藏、观看记录与设置均会保留。", cacheLimitMb)}
+            {cacheUnlimited
+              ? tr("将彻底清理已缓存的图片、视频缓冲与网页媒体文件，释放占用空间。当前上限为无上限；登录状态、收藏、观看记录与设置均会保留。")
+              : tr("将彻底清理已缓存的图片、视频缓冲与网页媒体文件，释放占用空间。超出 {0} 时也会自动淘汰较早缓存；登录状态、收藏、观看记录与设置均会保留。", formatCacheLimitLabel(cacheLimitMb))}
           </p>
           {clearError && <p role="alert" className="text-[13px] text-danger mt-3">{clearError}</p>}
           <div className="flex gap-2 mt-5">
@@ -535,10 +584,15 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
               clearBusy.current = true;
               setClearing(true); setClearError("");
               try {
-                await api.clearCache();
-                readCache();
+                const res = await api.clearCache();
+                await readCache();
                 setClearOpen(false);
-                toast(tr("缓存已清理"), "ok");
+                toast(
+                  res.freedBytes && res.freedBytes > 0
+                    ? tr("缓存已清理，释放 {0}", formatCacheBytes(res.freedBytes))
+                    : tr("缓存已清理"),
+                  "ok",
+                );
               } catch (error) {
                 setClearError(error instanceof Error ? error.message : String(error || tr("清理失败，请重试")));
               } finally { clearBusy.current = false; setClearing(false); }

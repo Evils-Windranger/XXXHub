@@ -560,9 +560,9 @@ export default function TvQrSyncModal({
           {status === "idle" && manualOpen && (
             <div className="w-full max-w-[340px] rounded-2xl bg-black/80 backdrop-blur-xl border border-white/15 p-4 space-y-3">
               <input
+                aria-label={tr("导入视频源")}
                 value={manualText}
                 onChange={(e) => setManualText(e.target.value)}
-                placeholder={tr("电视二维码链接 / 视频源链接 / hghubx-src:// 口令")}
                 className="w-full h-10 px-3 rounded-xl bg-white/10 text-[13px] text-white font-mono outline-none placeholder:text-white/45"
                 autoFocus
               />

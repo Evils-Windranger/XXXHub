@@ -22,7 +22,6 @@ static SEG_LOADING: Lazy<Mutex<HashMap<String, Weak<SegmentLoad>>>> =
 const KEY_CACHE_MAX: usize = 120;
 const KEY_CACHE_MAX_BYTES: usize = 4 * 1024 * 1024;
 const SEG_CACHE_MAX: usize = 36;
-const SEG_CACHE_MAX_BYTES: usize = 4 * 1024 * 1024;
 const SEG_CACHE_TOTAL_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -84,7 +83,7 @@ where
     if scope != current {
         return false;
     }
-    if len > SEG_CACHE_MAX_BYTES {
+    if len > crate::cache::max_segment_item_bytes() {
         return true;
     }
     let key = segment_cache_key(scope, url);
@@ -195,6 +194,11 @@ pub(super) fn stats() -> (usize, usize, usize) {
     let (kc, kb, kl) = KEY_CACHE.lock().map(|g| g.stats()).unwrap_or((0, 0, KEY_CACHE_MAX_BYTES));
     let (sc, sb, sl) = SEG_CACHE.lock().map(|g| g.stats()).unwrap_or((0, 0, SEG_CACHE_TOTAL_BYTES));
     (kc + sc, kb + sb, kl + sl)
+}
+
+pub(super) fn set_limits(l: &crate::cache::CacheBucketLimits) {
+    if let Ok(mut g) = KEY_CACHE.lock() { g.set_limits(l.key_items, l.key_bytes); }
+    if let Ok(mut g) = SEG_CACHE.lock() { g.set_limits(l.seg_items, l.seg_bytes); }
 }
 
 #[cfg(test)]

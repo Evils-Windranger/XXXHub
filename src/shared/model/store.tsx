@@ -6,6 +6,7 @@ import { isStrictSecurity, setStrictSecurity as setHtmlStrictSecurity } from "..
 import type { User } from "../api/types";
 import { readStorage, STORAGE_KEYS } from "../storage/storage";
 import { pickGuestData, useAccountData, type GuestData } from "./accountData";
+import { runSilentSourceUpdate } from "./sourceAutoUpdate";
 import { tr } from "../i18n";
 
 export type Platform = "android" | "ios" | "windows" | "macos" | "linux";
@@ -421,6 +422,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener("hg:source-changed", refreshSourceState);
     return () => window.removeEventListener("hg:source-changed", refreshSourceState);
   }, [refreshSourceState]);
+
+  const sourceStateRef = useRef(sourceState);
+  sourceStateRef.current = sourceState;
+  const sourceReady = sourceState !== null && sourceState !== "unsupported";
+
+  useEffect(() => {
+    if (!sourceReady) return;
+    const timer = window.setTimeout(() => {
+      void runSilentSourceUpdate(sourceStateRef.current, { force: true });
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [sourceReady]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void runSilentSourceUpdate(sourceStateRef.current);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
 
   const sourceStateStatus: "loading" | "ready" | "unsupported" =
     sourceState === null ? "loading" : sourceState === "unsupported" ? "unsupported" : "ready";

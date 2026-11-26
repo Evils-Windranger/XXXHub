@@ -97,9 +97,11 @@ pub async fn cache_stats(app: tauri::AppHandle) -> Result<crate::cache::CacheSta
 }
 
 #[tauri::command]
-pub async fn cache_clear(
-    webview: tauri::Webview,
-) -> Result<crate::cache::CacheClearReport, String> {
-    crate::media::clear_caches();
-    crate::cache::clear_web_cache(&webview).await
+pub async fn cache_clear(webview: tauri::Webview) -> Result<crate::cache::CacheClearReport, String> {
+    crate::cache::clear_all(&webview).await
+}
+
+#[tauri::command]
+pub async fn cache_set_limit(app: tauri::AppHandle, limit_mb: u64) -> Result<crate::cache::CacheStatsReport, String> {
+    crate::cache::set_limit_mb(&app, limit_mb)
 }

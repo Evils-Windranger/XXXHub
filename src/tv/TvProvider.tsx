@@ -6,6 +6,7 @@ import { autoLineEnabled, initAutoLine } from "../shared/network/autoLine";
 import { initializeLibrary, listLibrary, setFavorite, saveProgress, subscribeLibrary, clearHistory } from "./library";
 import { contentKey, type TvContent, type TvLibraryEntry, type TvProgress } from "./model";
 import { usePlaybackPreferences } from "./preferences";
+import { runSilentSourceUpdate } from "../shared/model/sourceAutoUpdate";
 import { setCatalogSource } from "./search/catalog";
 import { applyTvSyncEnvelope } from "./tvSync";
 
@@ -132,6 +133,29 @@ export function TvProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("hg:line-changed", onSource);
     };
   }, [refreshSourceState]);
+
+  const sourceStateRef = useRef(sourceState);
+  sourceStateRef.current = sourceState;
+  const tvSourceReady = ready && sourceState !== null && sourceState !== "unsupported";
+
+  useEffect(() => {
+    if (!tvSourceReady) return;
+    const timer = window.setTimeout(() => {
+      void runSilentSourceUpdate(sourceStateRef.current, { force: true });
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [tvSourceReady]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void runSilentSourceUpdate(sourceStateRef.current);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [ready]);
 
   useEffect(() => {
     setCatalogSource(effectiveSource);

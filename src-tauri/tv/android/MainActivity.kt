@@ -121,10 +121,46 @@ class MainActivity : TauriActivity() {
     }
   }
 
+  private fun dirBytes(file: File?, depth: Int = 0): Long {
+    if (file == null || depth > 8) return 0L
+    val list = file.listFiles() ?: return if (file.isFile) file.length() else 0L
+    var total = 0L
+    for (child in list) {
+      if (child.isDirectory) total += dirBytes(child, depth + 1)
+      else if (child.isFile) total += child.length()
+    }
+    return total
+  }
+
+  inner class TvCacheBridge(private val webView: WebView) {
+    @JavascriptInterface
+    fun clearWebCache(): Long {
+      return try {
+        val root = cacheDir
+        val before = dirBytes(root)
+        val latch = CountDownLatch(1)
+        webView.post {
+          try {
+            webView.clearCache(true)
+          } finally {
+            latch.countDown()
+          }
+        }
+        latch.await(3, TimeUnit.SECONDS)
+        try { Thread.sleep(180) } catch (_: InterruptedException) {}
+        val after = dirBytes(root)
+        (before - after).coerceAtLeast(0L)
+      } catch (_: Throwable) {
+        -1L
+      }
+    }
+  }
+
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
     mainWebView = webView
     webView.addJavascriptInterface(TvApkInstaller(), "HGhubXTvInstaller")
+    webView.addJavascriptInterface(TvCacheBridge(webView), "__HG_CACHE__")
     deliverDeepLink()
   }
 

@@ -114,6 +114,7 @@ pub fn run() {
                 let _ = std::fs::create_dir_all(&dir);
                 // 上次选择的线路（设置 → 线路）在启动时恢复
                 net::bind_base(&dir);
+                cache::bind(&dir);
                 playback_log::bind(&dir);
                 source::bind(&dir);
                 let state: tauri::State<Api> = app.state();
@@ -267,6 +268,7 @@ pub fn run() {
             api::feed::api_search_hot,
             api::platform::cache_stats,
             api::platform::cache_clear,
+            api::platform::cache_set_limit,
             api::feed::api_posts,
             api::feed::api_post,
             api::feed::api_post_playback,

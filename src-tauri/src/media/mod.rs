@@ -45,6 +45,12 @@ pub fn cache_stats() -> (usize, usize, usize, u64, u64) {
     (ic, sc, pc, (ib + sb + pb) as u64, (il + sl + pl) as u64)
 }
 
+pub fn apply_cache_limits(l: &crate::cache::CacheBucketLimits) {
+    image::set_limits(l.img_items, l.img_bytes);
+    segment::set_limits(l);
+    hls::set_limits(l.pl_items, l.pl_bytes);
+}
+
 /// 统一入口：`<LOCAL_ORIGIN>/img?u=` / `hls?u=` / `seg?u=`
 ///
 /// `origin` 是本平台自定义协议的完整基址，见 [`LOCAL_ORIGIN`]；用于改写 m3u8 里的

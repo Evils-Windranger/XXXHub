@@ -156,6 +156,10 @@ pub(super) fn stats() -> (usize, usize, usize) {
     PL_CACHE.lock().map(|g| g.stats()).unwrap_or((0, 0, PL_CACHE_MAX_BYTES))
 }
 
+pub(super) fn set_limits(items: Option<usize>, bytes: Option<usize>) {
+    if let Ok(mut g) = PL_CACHE.lock() { g.set_limits(items, bytes); }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
