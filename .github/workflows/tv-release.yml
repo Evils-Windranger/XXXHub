@@ -191,4 +191,4 @@ jobs:
           if [ "$PRERELEASE" = "true" ] || [[ "${TAG#tv-v}" == *-* ]]; then
             EXTRA+=(--prerelease)
           fi
-          gh release create "$TAG" artifacts/* --title "HGhubX TV ${TAG}" "${EXTRA[@]}" -R "$GITHUB_REPOSITORY"
+          gh release create "$TAG" artifacts/* --title "HGhubX TV ${TAG}" --target "$GITHUB_SHA" "${EXTRA[@]}" -R "$GITHUB_REPOSITORY"
