@@ -10,6 +10,7 @@ import { setPlaybackPreferences, usePlaybackPreferences } from "./preferences";
 import { TvPinSettingsModal, type TvPinModalMode } from "./TvPinGate";
 import TvLanPushPanel from "./TvLanPushPanel";
 import { useTv } from "./TvProvider";
+import { Logo } from "../shared/ui/icons";
 import { TvModal } from "./ui";
 import {
   cancelTvUpdateDownload,
@@ -158,7 +159,7 @@ export default function SettingsPage(){
         </div>
         <button data-tv-focus="clear-cache" disabled={busy} onClick={()=>void run(async()=>{const res=await api.clearCache();resetCachedTvUpdate();await refreshCache();setMessage(res.freedBytes&&res.freedBytes>0?`缓存已清理（释放 ${formatCacheBytes(res.freedBytes)}），片库和偏好已保留`:"缓存已清理，片库和偏好已保留");},"")}>清理缓存</button>
       </>}
-      {group==="关于"&&<><h3>HGhubX TV {APP_VERSION}</h3>
+      {group==="关于"&&<><div className="tv-about-head" style={{display:"flex",alignItems:"center",gap:12,marginBottom:8}}><Logo size={40}/><h3>HGhubX TV {APP_VERSION}</h3></div>
         <div className="tv-update-card">
           {updater.status==="idle"&&<p>支持电视端应用内一键更新（内置加速节点自动回退与 SHA-256 完整性校验）。</p>}
           {updater.status==="checking"&&<p>正在检查 GitHub Release 新版本…</p>}

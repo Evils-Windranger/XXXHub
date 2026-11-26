@@ -909,6 +909,14 @@ const en: Record<string, string> = {
   "将彻底清理已缓存的图片、视频缓冲与网页媒体文件，释放占用空间。当前上限为无上限；登录状态、收藏、观看记录与设置均会保留。": "Thoroughly clears cached images, video buffers, and WebView media files. Limit is set to unlimited. Your sign-in, favorites, watch history, and settings are kept.",
   "将彻底清理已缓存的图片、视频缓冲与网页媒体文件，释放占用空间。超出 {0} 时也会自动淘汰较早缓存；登录状态、收藏、观看记录与设置均会保留。": "Thoroughly clears cached images, video buffers, and WebView media files. Oldest cache is also evicted above {0}. Your sign-in, favorites, watch history, and settings are kept.",
   "缓存已清理，释放 {0}": "Cache cleared, freed {0}",
+  "正在检查收藏更新…": "Checking favorites for updates…",
+  "松开检查更新": "Release to check updates",
+  "下拉检查收藏更新": "Pull down to check updates",
+  "刷新收藏": "Refresh favorites",
+  "收藏已刷新": "Favorites refreshed",
+  "发现 {0} 部收藏更新，新增 {1} 集": "{0} favorite(s) updated · {1} new episode(s)",
+  "收藏已刷新，暂无新集更新": "Favorites refreshed; no new episodes yet",
+  "切镜头": "Switch Lens",
 };
 
 export default en;

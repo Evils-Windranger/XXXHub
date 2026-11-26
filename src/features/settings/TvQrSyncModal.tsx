@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   api,
@@ -9,7 +9,7 @@ import {
   type TvBidirectionalSyncResult,
   type TvSyncData,
 } from "../../shared/api/api";
-import { decodeQrFromFile, decodeQrFromVideo, parseTvLanTarget } from "../../shared/lib/qrDecode";
+import { decodeQrFromFile, decodeQrFromVideo, hasNativeBarcodeDetector, parseTvLanTarget } from "../../shared/lib/qrDecode";
 import { registerOverlayBack } from "../../shared/lib/back";
 import { useContentPreferences, mergeContentPreferences } from "../../shared/model/contentPreferences";
 import { useStore } from "../../shared/model/store";
@@ -40,6 +40,79 @@ function formatLastSync(ts?: number | null): string {
   if (diff < 3600) return tr("{0} 分钟前", Math.floor(diff / 60));
   if (diff < 86400) return tr("{0} 小时前", Math.floor(diff / 3600));
   return tr("{0} 天前", Math.floor(diff / 86400));
+}
+
+function isAuxRearLensLabel(label: string): boolean {
+  return /(?:ultra|wide|0\.[56]|macro|tele|depth|mono|\bir\b|tof|bokeh|广角|微距|长焦|景深)/i.test(label);
+}
+
+function isFrontCameraLabel(label: string): boolean {
+  return /(?:front|user|selfie|facetime|前置)/i.test(label);
+}
+
+function pickPreferredRearCameraId(devices: MediaDeviceInfo[]): { mainId: string | null; rearIds: string[] } {
+  const videos = devices.filter((d) => d.kind === "videoinput" && d.deviceId);
+  const rears = videos.filter((d) => !isFrontCameraLabel(d.label));
+  const rearIds = rears.map((d) => d.deviceId);
+  if (!rears.length) return { mainId: null, rearIds: videos.map((d) => d.deviceId) };
+  const ranked = [...rears].sort((a, b) => {
+    const score = (d: MediaDeviceInfo) => {
+      let s = 0;
+      if (!isAuxRearLensLabel(d.label)) s += 100;
+      if (/(?:back|rear|main|environment|后置|主摄)/i.test(d.label)) s += 20;
+      if (/\bcamera\s*0\b|camera2\s*0\b/i.test(d.label)) s += 10;
+      return s;
+    };
+    return score(b) - score(a);
+  });
+  return { mainId: ranked[0]?.deviceId ?? null, rearIds };
+}
+
+async function tuneCameraTrack(track: MediaStreamTrack): Promise<void> {
+  try {
+    const caps = (track.getCapabilities?.() ?? {}) as Record<string, unknown>;
+    const adv: Record<string, unknown> = {};
+    if (Array.isArray(caps.focusMode)) {
+      if (caps.focusMode.includes("continuous")) adv.focusMode = "continuous";
+      else if (caps.focusMode.includes("single-shot")) adv.focusMode = "single-shot";
+    }
+    if (Array.isArray(caps.exposureMode) && caps.exposureMode.includes("continuous")) {
+      adv.exposureMode = "continuous";
+    }
+    if (Array.isArray(caps.whiteBalanceMode) && caps.whiteBalanceMode.includes("continuous")) {
+      adv.whiteBalanceMode = "continuous";
+    }
+    if (Object.keys(adv).length > 0 && typeof track.applyConstraints === "function") {
+      await track.applyConstraints({ advanced: [adv as MediaTrackConstraintSet] });
+    }
+  } catch { /* ignore unsupported advanced constraints */ }
+}
+
+async function acquireCameraStream(preferredDeviceId?: string): Promise<MediaStream> {
+  const mediaDevices = navigator.mediaDevices;
+  const attempts: MediaTrackConstraints[] = preferredDeviceId
+    ? [
+        { deviceId: { exact: preferredDeviceId }, width: { ideal: 1920, min: 1280 }, height: { ideal: 1080, min: 720 }, frameRate: { ideal: 30 } },
+        { deviceId: { exact: preferredDeviceId }, width: { ideal: 1280, min: 640 }, height: { ideal: 720, min: 480 } },
+        { deviceId: { exact: preferredDeviceId } },
+      ]
+    : [
+        { facingMode: { ideal: "environment" }, width: { ideal: 1920, min: 1280 }, height: { ideal: 1080, min: 720 }, frameRate: { ideal: 30 } },
+        { facingMode: { ideal: "environment" }, width: { ideal: 1280, min: 960 }, height: { ideal: 720, min: 540 }, frameRate: { ideal: 30 } },
+        { facingMode: { ideal: "environment" } },
+      ];
+  let lastError: unknown;
+  for (const video of attempts) {
+    try {
+      return await mediaDevices.getUserMedia({ video, audio: false });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (!preferredDeviceId) {
+    return await mediaDevices.getUserMedia({ video: true, audio: false });
+  }
+  throw lastError;
 }
 
 type MergedTvItem = {
@@ -86,6 +159,10 @@ export default function TvQrSyncModal({
   const [doneBanner, setDoneBanner] = useState<SyncDoneBanner | null>(null);
   const [error, setError] = useState("");
   const [busyPairId, setBusyPairId] = useState<string | null>(null);
+  const [rearCameraIds, setRearCameraIds] = useState<string[]>([]);
+  const [selectedCameraId, setSelectedCameraId] = useState<string | undefined>(undefined);
+  const [focusPulse, setFocusPulse] = useState<{ x: number; y: number } | null>(null);
+  const focusTimerRef = useRef(0);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -124,6 +201,7 @@ export default function TvQrSyncModal({
   useEffect(() => {
     if (!open) {
       window.clearTimeout(autoCloseRef.current);
+      window.clearTimeout(focusTimerRef.current);
       stopCamera();
       setManualOpen(false);
       setManualText("");
@@ -133,6 +211,9 @@ export default function TvQrSyncModal({
       setDoneBanner(null);
       setError("");
       setBusyPairId(null);
+      setRearCameraIds([]);
+      setSelectedCameraId(undefined);
+      setFocusPulse(null);
       busyRef.current = false;
       return;
     }
@@ -362,14 +443,44 @@ export default function TvQrSyncModal({
         return;
       }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } },
-          audio: false,
-        });
+        let stream = await acquireCameraStream(selectedCameraId);
         if (!alive) {
           stream.getTracks().forEach((track) => track.stop());
           return;
         }
+        let track = stream.getVideoTracks()[0];
+        if (track) await tuneCameraTrack(track);
+
+        if (navigator.mediaDevices.enumerateDevices) {
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            if (!alive) {
+              stream.getTracks().forEach((t) => t.stop());
+              return;
+            }
+            const { mainId, rearIds } = pickPreferredRearCameraId(devices);
+            setRearCameraIds(rearIds);
+            const activeId = track?.getSettings?.().deviceId;
+            const activeHeight = track?.getSettings?.().height ?? 0;
+            const activeLabel = track?.label ?? "";
+            if (!selectedCameraId && mainId && mainId !== activeId && (activeHeight < 720 || isAuxRearLensLabel(activeLabel))) {
+              try {
+                const better = await acquireCameraStream(mainId);
+                if (!alive) {
+                  better.getTracks().forEach((t) => t.stop());
+                  stream.getTracks().forEach((t) => t.stop());
+                  return;
+                }
+                stream.getTracks().forEach((t) => t.stop());
+                stream = better;
+                track = stream.getVideoTracks()[0];
+                if (track) await tuneCameraTrack(track);
+                setSelectedCameraId(mainId);
+              } catch { /* keep initial stream */ }
+            }
+          } catch { /* ignore device enumeration error */ }
+        }
+
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -377,6 +488,7 @@ export default function TvQrSyncModal({
         }
         if (alive) setCameraState("ready");
 
+        const intervalMs = hasNativeBarcodeDetector() ? 180 : 260;
         const tick = async () => {
           if (!alive) return;
           if (!decodingRef.current && videoRef.current) {
@@ -393,9 +505,9 @@ export default function TvQrSyncModal({
               decodingRef.current = false;
             }
           }
-          if (alive) timer = window.setTimeout(() => void tick(), 180);
+          if (alive) timer = window.setTimeout(() => void tick(), intervalMs);
         };
-        timer = window.setTimeout(() => void tick(), 220);
+        timer = window.setTimeout(() => void tick(), 200);
       } catch {
         if (alive) setCameraState("error");
       }
@@ -407,7 +519,40 @@ export default function TvQrSyncModal({
       window.clearTimeout(timer);
       stopCamera();
     };
-  }, [open, view, manualOpen, codeTarget, status, handleDecodedRaw, stopCamera]);
+  }, [open, view, manualOpen, codeTarget, status, selectedCameraId, handleDecodedRaw, stopCamera]);
+
+  const cycleRearCamera = () => {
+    if (rearCameraIds.length < 2) return;
+    const activeId = streamRef.current?.getVideoTracks()[0]?.getSettings?.().deviceId ?? selectedCameraId;
+    const idx = activeId ? rearCameraIds.indexOf(activeId) : 0;
+    const nextId = rearCameraIds[(idx + 1) % rearCameraIds.length];
+    if (nextId) setSelectedCameraId(nextId);
+  };
+
+  const triggerTapFocus = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (cameraState !== "ready" || status !== "idle" || manualOpen || codeTarget) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    setFocusPulse({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+    window.clearTimeout(focusTimerRef.current);
+    focusTimerRef.current = window.setTimeout(() => setFocusPulse(null), 550);
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track || typeof track.applyConstraints !== "function") return;
+    const caps = (track.getCapabilities?.() ?? {}) as { focusMode?: string[] };
+    if (!Array.isArray(caps.focusMode)) return;
+    if (caps.focusMode.includes("single-shot")) {
+      void track.applyConstraints({ advanced: [{ focusMode: "single-shot" } as MediaTrackConstraintSet] })
+        .then(() => {
+          if (caps.focusMode?.includes("continuous")) {
+            window.setTimeout(() => {
+              void track.applyConstraints({ advanced: [{ focusMode: "continuous" } as MediaTrackConstraintSet] }).catch(() => {});
+            }, 350);
+          }
+        })
+        .catch(() => {});
+    } else if (caps.focusMode.includes("continuous")) {
+      void track.applyConstraints({ advanced: [{ focusMode: "continuous" } as MediaTrackConstraintSet] }).catch(() => {});
+    }
+  };
 
   const onFilePick = async (file: File | undefined) => {
     if (!file) return;
@@ -502,6 +647,15 @@ export default function TvQrSyncModal({
           </button>
 
           <div className="flex items-center gap-2">
+            {rearCameraIds.length > 1 && (
+              <button
+                type="button"
+                onClick={cycleRearCamera}
+                className="h-9 px-3 rounded-full bg-black/50 backdrop-blur-md border border-white/15 text-[12px] font-medium text-white pressable"
+              >
+                {tr("切镜头")}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
@@ -520,7 +674,14 @@ export default function TvQrSyncModal({
         </div>
 
         {/* Center viewport */}
-        <div className="relative z-10 flex-1 flex items-center justify-center px-6">
+        <div className="relative z-10 flex-1 flex items-center justify-center px-6" onClick={triggerTapFocus}>
+          {focusPulse && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute w-14 h-14 -ml-7 -mt-7 rounded-full border-2 border-primary/90 animate-ping"
+              style={{ left: focusPulse.x, top: focusPulse.y }}
+            />
+          )}
           {status === "syncing" && (
             <div className="w-full max-w-[300px] rounded-2xl bg-black/75 backdrop-blur-xl border border-white/15 p-6 flex flex-col items-center gap-3 text-center">
               <Loader />

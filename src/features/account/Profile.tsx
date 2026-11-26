@@ -12,8 +12,9 @@ import { Avatar, Empty, Modal } from "../../shared/ui/ui";
 import { MediaCard } from "../../shared/ui/cards";
 import { useContentPreferences } from "../../shared/model/contentPreferences";
 import { CollectionLink, CollectionLinks } from "../../shared/ui/CollectionLink";
-import { IChevR, IClock, IHeart, ILogout, IScan, ISettings, IStar, IUser, IUserF, IFilter } from "../../shared/ui/icons";
+import { IChevR, IClock, IHeart, ILogout, IRefresh, IScan, ISettings, IStar, IUser, IUserF, IFilter } from "../../shared/ui/icons";
 import { tr } from "../../shared/i18n";
+import { triggerHaptic } from "../../shared/lib/haptics";
 import { useTabSwipe } from "../../shared/ui/hooks/useTabSwipe";
 import TvQrSyncModal from "../settings/TvQrSyncModal";
 
@@ -51,6 +52,9 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
   const [failedIds, setFailedIds] = useState<number[]>([]);
   const [reload, setReload] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const pullRefreshingRef = useRef(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [logoutError, setLogoutError] = useState("");
@@ -91,6 +95,96 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
     };
   }, []);
 
+  const favsRef = useRef(favs);
+  favsRef.current = favs;
+  const postFavsRef = useRef(postFavs);
+  postFavsRef.current = postFavs;
+  const userRef = useRef(user);
+  userRef.current = user;
+  const showingPostsRef = useRef(false);
+  showingPostsRef.current = capabilities.posts && tab === "fav" && favKind === "post";
+
+  const refreshFavoritesForUpdates = async () => {
+    if (pullRefreshingRef.current) return;
+    const generation = accountGeneration();
+    const revision = actionRevision.current;
+    const current = () => mounted.current && accountGeneration() === generation && actionRevision.current === revision;
+    pullRefreshingRef.current = true;
+    setPullRefreshing(true);
+    setFailedIds([]);
+    try {
+      const beforeCounts = new Map<number, number>();
+      for (const id of favsRef.current) {
+        const prevDetail = videoCacheRef.current[id];
+        if (prevDetail) beforeCounts.set(id, detailEpisodeCount(prevDetail));
+      }
+      if (userRef.current) {
+        await syncAccount({ manual: true }).catch(() => {});
+        if (!current()) return;
+      }
+      refreshedFavorites.current.clear();
+      if (showingPostsRef.current) {
+        const targets = [...postFavsRef.current];
+        const loaded: Record<number, Post> = {};
+        const failedList: number[] = [];
+        for (let offset = 0; offset < targets.length; offset += 6) {
+          const batch = targets.slice(offset, offset + 6);
+          const results = await Promise.allSettled(batch.map((id) => api.post(id)));
+          if (!current()) return;
+          results.forEach((result, index) => {
+            const id = batch[index];
+            if (result.status === "fulfilled" && result.value) loaded[id] = result.value;
+            else failedList.push(id);
+          });
+        }
+        setPostCache((previous) => ({ ...previous, ...loaded }));
+        setFailedIds(failedList);
+        toast(tr("收藏已刷新"), "ok");
+      } else {
+        const targets = [...favsRef.current];
+        let updatedShows = 0;
+        let addedEpisodes = 0;
+        const failedList: number[] = [];
+        for (let offset = 0; offset < targets.length; offset += 6) {
+          const batch = targets.slice(offset, offset + 6);
+          const results = await Promise.allSettled(batch.map((id) => api.video(id)));
+          if (!current()) return;
+          const loaded: Record<number, Detail> = {};
+          results.forEach((result, index) => {
+            const id = batch[index];
+            if (result.status === "fulfilled" && result.value) {
+              loaded[id] = result.value;
+              refreshedFavorites.current.add(id);
+              const before = beforeCounts.get(id) ?? 0;
+              const after = detailEpisodeCount(result.value);
+              if (before > 0 && after > before) {
+                updatedShows += 1;
+                addedEpisodes += after - before;
+              }
+            } else if (!videoCacheRef.current[id]) {
+              failedList.push(id);
+            }
+          });
+          setVideoCache((previous) => ({ ...previous, ...loaded }));
+        }
+        setFailedIds(failedList);
+        if (updatedShows > 0) {
+          triggerHaptic("tap");
+          toast(tr("发现 {0} 部收藏更新，新增 {1} 集", updatedShows, addedEpisodes), "ok");
+        } else if (targets.length > 0) {
+          toast(tr("收藏已刷新，暂无新集更新"), "info");
+        } else {
+          toast(tr("收藏已刷新"), "ok");
+        }
+      }
+    } finally {
+      pullRefreshingRef.current = false;
+      if (mounted.current) setPullRefreshing(false);
+    }
+  };
+  const refreshFavoritesRef = useRef(refreshFavoritesForUpdates);
+  refreshFavoritesRef.current = refreshFavoritesForUpdates;
+
   useEffect(() => {
     if (!filterMenuOpen) return;
     const frame = requestAnimationFrame(() => {
@@ -121,6 +215,82 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
   const showingPosts = capabilities.posts && tab === "fav" && favKind === "post";
   const refreshFavorites = tab === "fav" && !showingPosts;
   const selectionMode = selectedIds.length > 0;
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller || !active || tab !== "fav" || selectionMode) {
+      setPullDistance(0);
+      return;
+    }
+    let tracking = false;
+    let startX = 0;
+    let startY = 0;
+    let currentPull = 0;
+    let armedHaptic = false;
+
+    const onStart = (event: TouchEvent) => {
+      if (pullRefreshingRef.current || event.touches.length !== 1 || scroller.scrollTop > 1) {
+        tracking = false;
+        return;
+      }
+      const touch = event.touches[0];
+      tracking = true;
+      startX = touch.clientX;
+      startY = touch.clientY;
+      currentPull = 0;
+      armedHaptic = false;
+    };
+
+    const onMove = (event: TouchEvent) => {
+      if (!tracking || event.touches.length !== 1) return;
+      const touch = event.touches[0];
+      const dx = touch.clientX - startX;
+      const dy = touch.clientY - startY;
+      if (dy <= 0 || Math.abs(dx) > Math.abs(dy)) {
+        if (currentPull === 0) tracking = false;
+        return;
+      }
+      if (scroller.scrollTop > 1) {
+        tracking = false;
+        currentPull = 0;
+        setPullDistance(0);
+        return;
+      }
+      if (dy > 8) {
+        if (event.cancelable) event.preventDefault();
+        currentPull = Math.min(84, (dy - 8) * 0.48);
+        setPullDistance(currentPull);
+        if (currentPull >= 54 && !armedHaptic) {
+          armedHaptic = true;
+          triggerHaptic("tap");
+        } else if (currentPull < 54) {
+          armedHaptic = false;
+        }
+      }
+    };
+
+    const onEnd = () => {
+      if (!tracking) return;
+      tracking = false;
+      const shouldRefresh = currentPull >= 54 && !pullRefreshingRef.current;
+      currentPull = 0;
+      setPullDistance(0);
+      if (shouldRefresh) {
+        void refreshFavoritesRef.current();
+      }
+    };
+
+    scroller.addEventListener("touchstart", onStart, { passive: true });
+    scroller.addEventListener("touchmove", onMove, { passive: false });
+    scroller.addEventListener("touchend", onEnd, { passive: true });
+    scroller.addEventListener("touchcancel", onEnd, { passive: true });
+    return () => {
+      scroller.removeEventListener("touchstart", onStart);
+      scroller.removeEventListener("touchmove", onMove);
+      scroller.removeEventListener("touchend", onEnd);
+      scroller.removeEventListener("touchcancel", onEnd);
+    };
+  }, [active, selectionMode, tab]);
   const limitKey = tab === "history" ? "history" : showingPosts ? "favPost" : "favVideo";
   const favoriteUnwatchedCount = (id: number, detail: Detail) =>
     unwatchedEpisodeCount(detail, history.find(h => h.id === id));
@@ -354,6 +524,15 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
 
       <div ref={scrollRef} {...tabSwipe} style={{ touchAction: "pan-y" }}
         className="ios-page-body flex-1 scroll-y pt-2 pb-24">
+        {tab === "fav" && (pullRefreshing || pullDistance > 0) && (
+          <div role="status" className="flex items-center justify-center gap-2 text-[12px] text-mut overflow-hidden"
+            style={{ height: pullRefreshing ? 38 : Math.round(pullDistance) }}>
+            {pullRefreshing
+              ? <Loader className="w-4 h-4 spinner" />
+              : <IRefresh size={14} className={pullDistance >= 54 ? "text-primary rotate-180 transition-transform" : "transition-transform"} />}
+            <span>{pullRefreshing ? tr("正在检查收藏更新…") : pullDistance >= 54 ? tr("松开检查更新") : tr("下拉检查收藏更新")}</span>
+          </div>
+        )}
         {/* 资料卡：已登录 / 未登录（点开登录抽屉） */}
         {user ? (
           <Surface className="ios-account-card flex flex-col gap-3 a-rise">
@@ -443,8 +622,17 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
                 <Button aria-pressed={favKind === "post"} onClick={() => { setFavKind("post"); setFavFilter("all"); setSelectedIds([]); }} className="ios-filter-pill">{tr("帖子{0}", postFavs.length ? ` ${postFavs.length}` : "")}</Button>
               )}
             </div>
-            {favKind === "video" && favs.length > 0 && (
-              <div ref={filterMenuRef} className="relative ml-auto" role="group" aria-label={tr("收藏状态筛选")}>
+            <div className="ml-auto flex items-center gap-1.5">
+              <Button
+                aria-label={tr("刷新收藏")}
+                disabled={pullRefreshing || loading}
+                onClick={() => void refreshFavoritesForUpdates()}
+                className="ios-filter-pill is-icon"
+              >
+                <IRefresh size={17} strokeWidth={1.8} className={pullRefreshing ? "animate-spin" : ""} />
+              </Button>
+              {favKind === "video" && favs.length > 0 && (
+                <div ref={filterMenuRef} className="relative" role="group" aria-label={tr("收藏状态筛选")}>
                 <Button ref={filterButtonRef}
                   aria-label={favFilter === "all" ? tr("收藏状态筛选") : `${tr("收藏状态筛选")}: ${activeFavoriteFilterLabel} ${activeFavoriteFilterCount}`}
                   aria-haspopup="menu" aria-expanded={filterMenuOpen} aria-pressed={favFilter !== "all"}
@@ -486,7 +674,8 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
                   </div>
                 )}
               </div>
-            )}
+              )}
+            </div>
           </div>
         )}
         {filteringHydrating && (

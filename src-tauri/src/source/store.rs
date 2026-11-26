@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +97,7 @@ struct Inner {
 
 pub struct SourceStore {
     inner: RwLock<Inner>,
+    kv_io_lock: Mutex<()>,
 }
 
 fn unix_secs() -> u64 {
@@ -105,11 +107,14 @@ fn unix_secs() -> u64 {
         .unwrap_or(0)
 }
 
+static WRITE_SEQ: AtomicU64 = AtomicU64::new(0);
+
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("创建视频源目录失败：{e}"))?;
     }
-    let tmp = path.with_extension("tmp");
+    let seq = WRITE_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = path.with_extension(format!("tmp.{seq}"));
     fs::write(&tmp, bytes).map_err(|e| format!("写入临时文件失败：{e}"))?;
     fs::rename(&tmp, path).map_err(|e| {
         let _ = fs::remove_file(&tmp);
@@ -126,6 +131,7 @@ impl SourceStore {
                 packages: HashMap::new(),
                 kv: HashMap::new(),
             }),
+            kv_io_lock: Mutex::new(()),
         }
     }
 
@@ -392,19 +398,38 @@ impl SourceStore {
         if val.as_deref().is_some_and(|v| v.len() > 32 * 1024) {
             return Err("storage value 超出上限（32 KB）".into());
         }
-        let mut g = self.inner.write().unwrap_or_else(|e| e.into_inner());
-        let root = g.root.clone();
-        let map = g.kv.entry(source_id.to_string()).or_default();
-        if map.len() >= 64 && !map.contains_key(key) {
-            return Err("单源本地存储键数量超出上限（64）".into());
-        }
-        match val {
-            Some(v) => { map.insert(key.to_string(), v); }
-            None => { map.remove(key); }
-        }
-        if let Some(root) = root {
-            let bytes = serde_json::to_vec(map).map_err(|e| format!("保存源状态失败：{e}"))?;
-            write_atomic(&root.join(source_id).join("state.json"), &bytes)?;
+        let has_root = {
+            let mut g = self.inner.write().unwrap_or_else(|e| e.into_inner());
+            let map = g.kv.entry(source_id.to_string()).or_default();
+            if map.get(key) == val.as_ref() {
+                return Ok(());
+            }
+            if map.len() >= 64 && !map.contains_key(key) {
+                return Err("单源本地存储键数量超出上限（64）".into());
+            }
+            match val {
+                Some(v) => { map.insert(key.to_string(), v); }
+                None => { map.remove(key); }
+            }
+            g.root.is_some()
+        };
+        if has_root {
+            let _io_guard = self.kv_io_lock.lock().unwrap_or_else(|e| e.into_inner());
+            let snapshot = {
+                let g = self.inner.read().unwrap_or_else(|e| e.into_inner());
+                g.root.as_ref().map(|root| {
+                    let bytes = g
+                        .kv
+                        .get(source_id)
+                        .map(serde_json::to_vec)
+                        .unwrap_or_else(|| Ok(b"{}".to_vec()));
+                    (root.join(source_id).join("state.json"), bytes)
+                })
+            };
+            if let Some((path, bytes_res)) = snapshot {
+                let bytes = bytes_res.map_err(|e| format!("保存源状态失败：{e}"))?;
+                write_atomic(&path, &bytes)?;
+            }
         }
         Ok(())
     }

@@ -9,24 +9,58 @@ import { Button, Surface } from "../../shared/ui/ios/controls";
 import { tr } from "../../shared/i18n";
 
 const BATCH_SIZE = 10;
+const HOT_TAGS_STORAGE_KEY = "hghubx_hot_tags_cache_v1";
+const hotTagsMemoryCache = new Map<string, HotTagItem[]>();
+const revalidatedKeys = new Set<string>();
+
+function readHotTagsCache(key: string): HotTagItem[] | null {
+  const mem = hotTagsMemoryCache.get(key);
+  if (mem) return mem;
+  try {
+    const raw = localStorage.getItem(HOT_TAGS_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { key?: unknown; items?: unknown } | null;
+    if (!parsed || parsed.key !== key || !Array.isArray(parsed.items)) return null;
+    const items = parsed.items.filter(
+      (x): x is HotTagItem => !!x && typeof x === "object" && typeof (x as HotTagItem).name === "string",
+    );
+    if (!items.length) return null;
+    hotTagsMemoryCache.set(key, items);
+    return items;
+  } catch {
+    return null;
+  }
+}
+
+function writeHotTagsCache(key: string, items: HotTagItem[]): void {
+  hotTagsMemoryCache.set(key, items);
+  try {
+    localStorage.setItem(HOT_TAGS_STORAGE_KEY, JSON.stringify({ key, items }));
+  } catch { /* Storage may be unavailable. */ }
+}
 
 /** Curated popular tags returned by the active source. */
 export function SearchTags({ active }: { active: boolean }) {
-  const { push } = useStore();
+  const { push, lineEpoch, activeSource } = useStore();
+  const cacheKey = `${activeSource?.id ?? "default"}:${lineEpoch}`;
   const { preferences, isTagBlocked } = useContentPreferences();
-  const [tags, setTags] = useState<HotTagItem[] | null>(null);
+  const [tags, setTags] = useState<HotTagItem[] | null>(() => readHotTagsCache(cacheKey));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [batch, setBatch] = useState(0);
   const busy = useRef(false);
   const sequence = useRef(0);
-  const loaded = useRef(false);
+  const loadedKey = useRef("");
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (manual = false) => {
     if (busy.current) return;
     busy.current = true;
     const token = ++sequence.current;
-    setLoading(true); setError("");
+    const cached = readHotTagsCache(cacheKey);
+    if (manual || !cached) {
+      setLoading(true);
+      setError("");
+    }
     try {
       const response = await api.hotTags();
       if (!Array.isArray(response?.items)) throw new Error(tr("标签数据格式异常，请重试"));
@@ -39,17 +73,38 @@ export function SearchTags({ active }: { active: boolean }) {
         unique.push({ name, slug: typeof item.slug === "string" ? item.slug : "" });
       }
       if (sequence.current !== token) return;
-      loaded.current = true;
-      setTags(unique); setBatch(0);
+      loadedKey.current = cacheKey;
+      revalidatedKeys.add(cacheKey);
+      writeHotTagsCache(cacheKey, unique);
+      setTags((prev) => {
+        if (!manual && prev && prev.length === unique.length && prev.every((item, idx) => item.name === unique[idx]?.name)) {
+          return prev;
+        }
+        return unique;
+      });
+      if (manual || !cached) setBatch(0);
+      setError("");
     } catch (cause) {
-      if (sequence.current === token) setError(cause instanceof Error ? cause.message : tr("标签加载失败，请重试"));
+      if (sequence.current === token && (manual || !cached)) {
+        setError(cause instanceof Error ? cause.message : tr("标签加载失败，请重试"));
+      }
     } finally {
       if (sequence.current === token) { busy.current = false; setLoading(false); }
     }
-  }, []);
+  }, [cacheKey]);
 
   useEffect(() => () => { sequence.current++; busy.current = false; }, []);
-  useEffect(() => { if (active && !loaded.current) void load(); }, [active, load]);
+  useEffect(() => {
+    if (!active) return;
+    const cached = readHotTagsCache(cacheKey);
+    if (cached && loadedKey.current !== cacheKey) {
+      setTags(cached);
+      loadedKey.current = cacheKey;
+      if (!revalidatedKeys.has(cacheKey)) void load(false);
+      return;
+    }
+    if (loadedKey.current !== cacheKey) void load(false);
+  }, [active, cacheKey, load]);
   const totalLoaded = tags?.length ?? 0;
   const available = tags ? (preferences.paused ? tags : tags.filter(tag => !isTagBlocked(tag.name))) : [];
   const count = available.length;
@@ -74,7 +129,7 @@ export function SearchTags({ active }: { active: boolean }) {
       {loading || tags === null ? tr("正在加载题材…") : totalLoaded > 0 ? tr("热门题材均已屏蔽，可在内容偏好中调整") : tr("暂无可用标签")}
     </p>}
     <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
-      <Button onClick={() => void load()} disabled={loading} aria-label={tr("刷新题材")}
+      <Button onClick={() => void load(true)} disabled={loading} aria-label={tr("刷新题材")}
         className="-ml-2 px-2 min-h-9 inline-flex items-center gap-1 text-[12px] text-mut pressable">
         {loading ? <Loader className="w-3 h-3" /> : <IRefresh size={13} />}{loading ? tr("加载中…") : tr("刷新")}
       </Button>

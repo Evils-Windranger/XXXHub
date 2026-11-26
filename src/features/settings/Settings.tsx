@@ -18,7 +18,7 @@ import { copyText } from "../../shared/lib/clipboard";
 import { HAPTIC_LEVELS, setHapticLevel, triggerHaptic, useHapticLevel, type HapticLevel } from "../../shared/lib/haptics";
 import { Loader } from "../../shared/ui/ios/effects";
 import { isBalanceVolumeSupported } from "../playback/balanceVolume";
-import { IBack, IBoltF, IBroom, IChevR, ICompress, IGlobe, IHeart, IHome, IInfo, ILink, ILockF, IMoon, IRefresh, IScan, ISun, IVol, IVolMute } from "../../shared/ui/icons";
+import { IBack, IBoltF, IBroom, IChevR, ICompress, IGlobe, IHeart, IHome, IInfo, ILink, ILockF, IMoon, IRefresh, IScan, ISun, IVol, IVolMute, Logo } from "../../shared/ui/icons";
 import { LOCALE_OPTIONS, N_, setLocale, tr, useLocale, type Locale } from "../../shared/i18n";
 
 const SETTING_GROUPS = [N_("外观"), N_("播放"), N_("内容偏好"), N_("本地数据"), N_("网络"), N_("播放诊断"), N_("其他")] as const;
@@ -539,7 +539,7 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
       <Modal label={tr("关于 HGhubX")} open={about} onClose={() => setAbout(false)} width={392}>
         <div className="p-5">
           <div className="flex items-center gap-3">
-            <span className="w-11 h-11 rounded-(--r-sm) brand-grad glow-neon flex items-center justify-center text-on-primary text-[17px] font-black">H</span>
+            <Logo size={44} className="shrink-0 rounded-(--r-sm) glow-neon" />
             <div>
               <div className="text-[16px] font-bold text-on leading-tight">HGhubX</div>
               <div className="text-[12px] text-mut mt-0.5">{tr("HGhubX 客户端 v{0}", APP_VERSION)}</div>

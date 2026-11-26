@@ -23,35 +23,87 @@ const TagIcon = ITag;
 const TAG_METRIC_PAGE_SIZE = 100;
 const TAG_METRIC_MAX_PAGES = 30;
 
-/** Retain the last good result on refresh, but never expose a previous route's data. */
+const DISCOVERY_STORAGE_PREFIX = "hghubx_discovery_cache_v1:";
+const discoveryMemoryCache = new Map<string, unknown>();
+
+function readDiscoveryCache<T>(key: string): T | null {
+  if (discoveryMemoryCache.has(key)) {
+    return discoveryMemoryCache.get(key) as T;
+  }
+  try {
+    const raw = localStorage.getItem(`${DISCOVERY_STORAGE_PREFIX}${key}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as T;
+    discoveryMemoryCache.set(key, parsed);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeDiscoveryCache<T>(key: string, data: T): void {
+  discoveryMemoryCache.set(key, data);
+  try {
+    localStorage.setItem(`${DISCOVERY_STORAGE_PREFIX}${key}`, JSON.stringify(data));
+  } catch { /* Storage may be unavailable or full. */ }
+}
+
+/** Retain cached/last good result on refresh (SWR), and never expose another source/line's data. */
 function useDiscoveryData<T>(baseKey: string, request: () => Promise<T>) {
-  const { lineEpoch } = useStore();
-  const key = `${lineEpoch}:${baseKey}`;
-  const [state, setState] = useState<{ key: string; data: T | null; loading: boolean; error: string }>({ key, data: null, loading: true, error: "" });
+  const { lineEpoch, activeSource } = useStore();
+  const key = `${activeSource?.id ?? "default"}:${lineEpoch}:${baseKey}`;
+  const [state, setState] = useState<{ key: string; data: T | null; loading: boolean; error: string }>(() => {
+    const cached = readDiscoveryCache<T>(key);
+    return { key, data: cached, loading: cached === null, error: "" };
+  });
   const sequence = useRef(0);
   const busy = useRef(false);
   const requestRef = useRef(request);
   requestRef.current = request;
-  const load = useCallback(async () => {
+  const load = useCallback(async (manual = false) => {
     if (busy.current) return;
     busy.current = true;
     const token = ++sequence.current;
-    setState(previous => ({ key, data: previous.key === key ? previous.data : null, loading: true, error: "" }));
+    const cached = readDiscoveryCache<T>(key);
+    setState(previous => {
+      const existing = previous.key === key && previous.data !== null ? previous.data : cached;
+      return { key, data: existing, loading: manual || existing === null, error: "" };
+    });
     try {
       const data = await requestRef.current();
-      if (token === sequence.current) setState({ key, data, loading: false, error: "" });
+      if (token === sequence.current) {
+        writeDiscoveryCache(key, data);
+        setState({ key, data, loading: false, error: "" });
+      }
     } catch (error) {
-      if (token === sequence.current) setState(previous => ({ ...previous, loading: false, error: error instanceof Error ? error.message : tr("加载失败，请重试") }));
+      if (token === sequence.current) {
+        const message = error instanceof Error ? error.message : tr("加载失败，请重试");
+        setState(previous => {
+          const existing = previous.key === key && previous.data !== null ? previous.data : cached;
+          return {
+            key,
+            data: existing,
+            loading: false,
+            error: manual || existing === null ? message : "",
+          };
+        });
+      }
     } finally {
       if (token === sequence.current) busy.current = false;
     }
   }, [key]);
   useEffect(() => {
     busy.current = false;
-    void load();
+    void load(false);
     return () => { sequence.current++; busy.current = false; };
   }, [load]);
-  return { data: state.key === key ? state.data : null, loading: state.key !== key || state.loading, err: state.key === key ? state.error : "", load };
+  const cached = state.key === key ? state.data : readDiscoveryCache<T>(key);
+  return {
+    data: cached,
+    loading: state.key !== key ? cached === null : state.loading,
+    err: state.key === key ? state.error : "",
+    load: () => load(true),
+  };
 }
 
 function RefreshStatus({ loading, error, onRetry }: { loading: boolean; error: string; onRetry: () => void }) {

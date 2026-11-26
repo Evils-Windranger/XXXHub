@@ -14,6 +14,7 @@ export const MAX_FOLLOWED_AUTHORS = 24;
 const STORAGE_KEY = "hghubx_authors_cache_v1";
 const DIRECTORY_PAGE_SIZE = 100;
 const MAX_DIRECTORY_PAGES = 10;
+const PAGE_CONCURRENCY = 4;
 
 let cache: { key: string; promise: Promise<AuthorDirectory> } | null = null;
 let cachedEntry: { key: string; directory: AuthorDirectory } | null = null;
@@ -131,17 +132,63 @@ async function load(sourceKey: string, requestId: number): Promise<AuthorDirecto
   const firstItems = Array.isArray(first?.items) ? first.items : [];
   merge(result, firstItems.map(asAuthor).filter((item): item is AuthorItem => !!item));
   const pages = Math.min(pageCount(asRecord(first?.pagination)), MAX_DIRECTORY_PAGES);
-  for (let page = 2; page <= pages; page += 1) {
-    if (requestId !== latestRequestId) break;
-    const next = await api.popularAuthors(page, DIRECTORY_PAGE_SIZE);
-    if (next?.supported === false) break;
-    const batch = Array.isArray(next?.items) ? next.items : [];
-    if (!batch.length) break;
-    merge(result, batch.map(asAuthor).filter((item): item is AuthorItem => !!item));
+  const paginationTotal = pageNumber(first?.pagination?.total);
+
+  const buildSnapshot = () => {
+    const sorted = sortAuthors([...result.values()]);
+    const total = Math.max(paginationTotal, sorted.length);
+    return { items: sorted, total, supported: true } as AuthorDirectory;
+  };
+
+  if (pages <= 1) {
+    const directory = buildSnapshot();
+    if (requestId === latestRequestId) {
+      writeStored(sourceKey, directory);
+      publish(sourceKey, directory);
+    }
+    return directory;
   }
-  const sorted = sortAuthors([...result.values()]);
-  const total = Math.max(pageNumber(first?.pagination?.total), sorted.length);
-  const directory: AuthorDirectory = { items: sorted, total, supported: true };
+
+  // Publish page 1 immediately so the UI renders top authors after a single RTT,
+  // then backfill remaining pages concurrently in bounded batches.
+  if (requestId === latestRequestId) {
+    publish(sourceKey, buildSnapshot());
+  }
+
+  for (let start = 2; start <= pages; start += PAGE_CONCURRENCY) {
+    if (requestId !== latestRequestId) break;
+    const batchPages: number[] = [];
+    for (let page = start; page < Math.min(start + PAGE_CONCURRENCY, pages + 1); page += 1) {
+      batchPages.push(page);
+    }
+    const settled = await Promise.allSettled(
+      batchPages.map((page) => api.popularAuthors(page, DIRECTORY_PAGE_SIZE)),
+    );
+    if (requestId !== latestRequestId) break;
+    let added = false;
+    let stopEarly = false;
+    for (const outcome of settled) {
+      if (outcome.status !== "fulfilled") continue;
+      const next = outcome.value;
+      if (next?.supported === false) {
+        stopEarly = true;
+        continue;
+      }
+      const batch = Array.isArray(next?.items) ? next.items : [];
+      if (!batch.length) {
+        stopEarly = true;
+        continue;
+      }
+      merge(result, batch.map(asAuthor).filter((item): item is AuthorItem => !!item));
+      added = true;
+    }
+    if (added && start + PAGE_CONCURRENCY <= pages) {
+      publish(sourceKey, buildSnapshot());
+    }
+    if (stopEarly) break;
+  }
+
+  const directory = buildSnapshot();
   if (requestId === latestRequestId) {
     writeStored(sourceKey, directory);
     publish(sourceKey, directory);

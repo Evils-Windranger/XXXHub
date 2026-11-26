@@ -64,6 +64,10 @@ function getDetector(): BarcodeDetectorInstance | null {
   }
 }
 
+export function hasNativeBarcodeDetector(): boolean {
+  return getDetector() !== null;
+}
+
 async function getJsQr(): Promise<JsQrFn> {
   if (!jsQrPromise) {
     jsQrPromise = import("jsqr").then((mod) => {
@@ -96,7 +100,17 @@ export async function decodeQrFromVideo(
   canvas: HTMLCanvasElement,
 ): Promise<string | null> {
   if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) return null;
-  const scale = Math.min(1, 720 / Math.max(video.videoWidth, video.videoHeight));
+  const detector = getDetector();
+  if (detector) {
+    try {
+      const hits = await detector.detect(video);
+      const val = hits.find((h) => h.rawValue)?.rawValue?.trim();
+      if (val) return val;
+    } catch {
+      detectorInstance = false;
+    }
+  }
+  const scale = Math.min(1, 960 / Math.max(video.videoWidth, video.videoHeight));
   const w = Math.max(1, Math.round(video.videoWidth * scale));
   const h = Math.max(1, Math.round(video.videoHeight * scale));
   if (canvas.width !== w) canvas.width = w;
@@ -104,7 +118,10 @@ export async function decodeQrFromVideo(
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return null;
   ctx.drawImage(video, 0, 0, w, h);
-  return decodeCanvas(canvas, ctx);
+  const jsQR = await getJsQr();
+  const img = ctx.getImageData(0, 0, w, h);
+  const hit = jsQR(img.data, w, h, { inversionAttempts: "attemptBoth" });
+  return hit?.data?.trim() || null;
 }
 
 function loadImageElement(file: File): Promise<HTMLImageElement> {
