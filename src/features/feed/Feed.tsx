@@ -374,7 +374,7 @@ export default function Feed({
   /* 若用户在视频首帧宽高解析出来前已点进全屏，解析出横屏后自动补发横屏方向请求 */
   useEffect(() => {
     if (!active || isDesktop || !fs || !landscapeVideo) return;
-    try { void invoke("set_orientation", { landscape: true }); } catch { /* ignore */ }
+    try { void invoke("set_orientation", { landscape: true }).catch(() => {}); } catch { /* ignore */ }
     try {
       (screen.orientation as unknown as { lock?: (o: string) => Promise<void> })?.lock?.("landscape")?.catch(() => {});
     } catch { /* ignore */ }

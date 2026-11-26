@@ -5,7 +5,6 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64_URL;
 use base64::Engine;
 use ring::signature::{UnparsedPublicKey, ED25519};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 /// Pure-shell client ships with NO built-in trusted signing keys.
 /// Any community source (unsigned or self-signed) can be imported freely; if a package
@@ -22,9 +21,9 @@ pub struct SignatureInfo {
 }
 
 fn sha256_hex(data: &[u8]) -> String {
-    let digest = Sha256::digest(data);
+    let digest = ring::digest::digest(&ring::digest::SHA256, data);
     let mut out = String::with_capacity(64);
-    for b in digest {
+    for b in digest.as_ref() {
         use std::fmt::Write;
         let _ = write!(&mut out, "{b:02x}");
     }

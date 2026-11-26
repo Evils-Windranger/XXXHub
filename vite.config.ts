@@ -22,14 +22,21 @@ export default defineConfig(({ mode }) => {
   const appVersion = edition === "tv" ? (tvVersion || standardVersion) : standardVersion;
   return {
     resolve: {
-      alias: {
-        "@edition-bootstrap": fileURLToPath(
-          new URL(
-            edition === "tv" ? "./src/tv/bootstrap.tsx" : "./src/main.tsx",
-            import.meta.url,
+      alias: [
+        {
+          find: "@edition-bootstrap",
+          replacement: fileURLToPath(
+            new URL(
+              edition === "tv" ? "./src/tv/bootstrap.tsx" : "./src/main.tsx",
+              import.meta.url,
+            ),
           ),
-        ),
-      },
+        },
+        {
+          find: /^hls\.js$/,
+          replacement: "hls.js/dist/hls.light.mjs",
+        },
+      ],
     },
     // optimize:false 让 Tailwind 不做本地 lightningcss 优化，兼容性变换统一交给 legacyCss。
     plugins: [react(), tailwindcss({ optimize: false }), legacyCss()],

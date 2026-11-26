@@ -2,7 +2,6 @@
 
 use once_cell::sync::Lazy;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -516,7 +515,7 @@ async fn download_from_candidate(
     }
 
     let mut file = std::fs::File::create(part_path).map_err(|_| "无法写入更新缓存目录".to_string())?;
-    let mut hasher = Sha256::new();
+    let mut hasher = ring::digest::Context::new(&ring::digest::SHA256);
     let mut downloaded = 0_u64;
     let mut magic = [0_u8; 4];
     let mut magic_checked = false;
@@ -596,7 +595,8 @@ async fn download_from_candidate(
         "percent": 100_u8,
     }));
 
-    let actual_sha256 = encode_hex(&hasher.finalize());
+    let digest = hasher.finish();
+    let actual_sha256 = encode_hex(digest.as_ref());
     if let Some(exp_sha) = expected_sha256 {
         if actual_sha256 != exp_sha {
             return Err("SHA-256 完整性校验未通过".into());

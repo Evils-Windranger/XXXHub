@@ -18,9 +18,10 @@ ad-hoc 签名都不应进入仓库或本机脚本输出。
   [`tauri.macos.conf.json`](../../src-tauri/tauri.macos.conf.json)、
   [`tauri.linux.conf.json`](../../src-tauri/tauri.linux.conf.json)、
   [`tauri.ios.conf.json`](../../src-tauri/tauri.ios.conf.json)、
+  [`Info.ios.plist`](../../src-tauri/Info.ios.plist)（`127.0.0.1` HTTP 例外与 `NSAllowsLocalNetworking`、相机与本地网络权限描述、`hghubx://` 深链）、
   [`tauri.tv.conf.json`](../../src-tauri/tauri.tv.conf.json)。
-- Rust 版本：[`src-tauri/Cargo.toml`](../../src-tauri/Cargo.toml) 的 `[package].version`、
-  `custom-protocol` feature；[`src-tauri/Cargo.lock`](../../src-tauri/Cargo.lock) 的 `hghubx` 包。
+- Rust 版本与构建瘦身：[`src-tauri/Cargo.toml`](../../src-tauri/Cargo.toml) 的 `[package].version`、
+  `custom-protocol` feature、`opt-level = "z"`、`reqwest` 精简为 `gzip`（移除 `brotli`/`charset`）及复用 `ring::digest::SHA256`（移除运行期 `sha2`）；[`src-tauri/Cargo.lock`](../../src-tauri/Cargo.lock) 的 `hghubx` 包。
 - CI 与 CD 拆分工作流（+ 公共 Composite Actions 与测试预览合成）：
   - 公共环境动作：`.github/actions/setup-node-pnpm`、`.github/actions/install-webkitgtk`、`.github/actions/setup-ffmpeg-chrome`、`.github/actions/setup-android-sdk`、`.github/actions/setup-ios-project`，供以下 5 个工作流统一复用。
   - 标准版 CI：[`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)（名称 `CI`），负责标准版日常校验（`changes`、`frontend`、`rust`、`smoke`、`playback` 矩阵）；纯文档变更（`docs/**`、`*.md`）仅运行 `frontend`（含文档链接与预算检查），跳过 `rust`/`smoke`/`playback`。
@@ -50,13 +51,14 @@ ad-hoc 签名都不应进入仓库或本机脚本输出。
    `package.json`、TV 版（`VITE_APP_EDITION=tv`）从 `src-tauri/tauri.tv.conf.json` 注入 `__APP_VERSION__`，避免界面版本写死；Rust 诊断日志（`playback_log.rs`、`net_diag.rs`）支持在 TV 编译期通过 `HGHUBX_APP_VERSION` 覆盖 `CARGO_PKG_VERSION`，避免前后端日志版本分裂。
    Vite 构建目标是 `["chrome66","safari14.1"]`（CSS 目标 `chrome66/safari13`，Worker 格式
    `iife` 以兼容无 module worker 的 Chromium 66–79），`cssCodeSplit:false`、`cssMinify:false`；
+   并通过别名将 `hls.js` 映射到轻量构建 `hls.js/dist/hls.light.mjs`，配合 `balanceVolume.ts` 去静态导入以延迟加载播放块。
    `scripts/legacy-css.ts`（enforce:post）在 generateBundle 阶段对汇总后的 CSS 做旧引擎回退
    （dvh、color-mix、cascade layers）、追加 `src/styles/legacy-webview.css` 并用 lightningcss
    压缩。Tailwind 插件以 `optimize:false` 运行，避免其内置优化先吃掉需要降级的语法。TV 构建脚本
    `build-android-tv.mjs` 复用同一 `pnpm build`，自动获得同一条兼容链，且本地 `pnpm android:tv:init` /
    `pnpm android:tv:build` 会在执行前后自动覆盖并清理 `.gitignore` 中的临时 `src-tauri/tauri.android.conf.json`。
-2. Tauri 构建的 `beforeBuildCommand` 在 Vite 构建后跑图标生成/同步和 Android 启动屏补丁
-   （iOS 启动屏补丁由 `scripts/build-ios-unsigned.sh` 执行），再打包 `dist`。桌面入口为
+2. Tauri 构建的 `beforeBuildCommand` 在 Vite 构建后跑图标生成/同步和 Android 启动屏/体积优化补丁
+   （`patch-android-splash.mjs` 同时写入 `proguard-hghubx.pro` keep 规则与 `build.gradle.kts` 的 `resourceConfigurations`、`isShrinkResources = true`、`useLegacyPackaging = true` 与 `META-INF` 排除；iOS 启动屏补丁由 `scripts/build-ios-unsigned.sh` 执行），再打包 `dist`。桌面入口为
    `pnpm tauri build`；开发为 `pnpm tauri dev`。
 3. `make check` 等价于 `test-rust` + `test-web` + `i18n` + `docs` + `budget` + `release-check` + `purity`：
    `cargo check --manifest-path src-tauri/Cargo.toml --all-targets`、
@@ -88,9 +90,8 @@ ad-hoc 签名都不应进入仓库或本机脚本输出。
      随后 `aapt2 dump badging` 打印实际 `versionCode`。
    - macOS：`quick` 只编 arm64；正式发布编 universal，产物 `HGhubX_<version>_universal.dmg`
      （quick 为 `_arm64.dmg`），ad-hoc 签名。
-   - iOS：`pnpm tauri ios init --ci`，用 PlistBuddy 补横竖屏和 ATS，再跑
-     `scripts/build-ios-unsigned.sh <version>`；Xcode `CODE_SIGNING_ALLOWED=NO`，产出
-     `HGhubX_<version>_ios.ipa`。
+   - iOS：`pnpm tauri ios init --ci`，用 PlistBuddy 补横竖屏与相机权限（同时由 `Info.ios.plist` 提供本地网络权限与 `hghubx://` 深链），再跑
+     `scripts/build-ios-unsigned.sh <version>`；Xcode `CODE_SIGNING_ALLOWED=NO` 编译后执行 `xattr -cr`、`codesign --force --deep --sign - --timestamp=none`、`otool -l` 校验 `LC_CODE_SIGNATURE` 并以 `zip -qrX` 产出 `HGhubX_<version>_ios.ipa`。
    - Linux：`pnpm tauri build` 按 `src-tauri/tauri.linux.conf.json` 同时产出 deb 与 rpm，文件名 `HGhubX_<version>_amd64.deb` 与 `HGhubX_<version>_x86_64.rpm`。
 7. 标准版 `release` job（`release.yml`）依赖五个标准版平台构建 job（不含 TV），在 `!cancelled()` 且
    `windows`、`android`、`macos`、`linux` 全部成功（`ios` 允许成功或失败）时执行；发布条件是 `v*` tag ref，
@@ -121,7 +122,7 @@ ad-hoc 签名都不应进入仓库或本机脚本输出。
 - Android versionCode：版本号解析 → `major*1e6 + minor*1e3 + patch` → 写入
   `bundle.android.versionCode` → APK 签名 → `aapt2` 复核。
 - iOS：`ios init` 生成工程 → 补 plist → 启动 Tauri options server → Xcode release 构建 →
-  `CODE_SIGNING_ALLOWED=NO` → 打包 Payload → `unzip -tq` 校验 → artifact。
+  `CODE_SIGNING_ALLOWED=NO` → `xattr -cr` + ad-hoc `codesign` + `LC_CODE_SIGNATURE` 校验 → `zip -qrX` 打包 Payload → `unzip -tq` 校验 → artifact。
 - CI：PR 或推送 `main` 触发 `frontend`/`rust`/`smoke`/`playback`，不打包。
   `v*` tag 触发全平台构建；手动打包用 `mode=package` 和 `platforms` 选范围，
   `tag` 留空只上传 Actions 产物，不进入发布任务。

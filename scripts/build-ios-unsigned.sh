@@ -85,6 +85,13 @@ EXECUTABLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.p
 test -s "$APP/$EXECUTABLE"
 file "$APP/$EXECUTABLE" | grep "Mach-O.*arm64"
 
+# Clear extended attributes and apply an ad-hoc signature so iOS sideloaders
+# see a valid LC_CODE_SIGNATURE load command and _CodeSignature directory.
+xattr -cr "$APP"
+codesign --force --deep --sign - --timestamp=none "$APP"
+codesign --verify --deep --strict "$APP"
+otool -l "$APP/$EXECUTABLE" | grep -q "LC_CODE_SIGNATURE"
+
 # 注意：Tauri 会把整份配置（含 devUrl）嵌进二进制，release 包里也能 grep 到
 # localhost:1420，不能据此判定 dev build。真正的判据是上面 file 出的
 # release 产物 + Xcode 用的是 release 配置。
@@ -96,7 +103,9 @@ fi
 PACKAGE_DIR=$(mktemp -d)
 mkdir -p "$PACKAGE_DIR/Payload"
 cp -R "$APP" "$PACKAGE_DIR/Payload/"
+xattr -cr "$PACKAGE_DIR/Payload"
 IPA="$ROOT/artifacts/HGhubX_${VERSION}_ios.ipa"
-(cd "$PACKAGE_DIR" && zip -qr "$IPA" Payload)
+rm -f "$IPA"
+(cd "$PACKAGE_DIR" && zip -qrX "$IPA" Payload)
 unzip -tq "$IPA"
 ls -lh "$IPA"

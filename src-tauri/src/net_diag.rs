@@ -258,23 +258,34 @@ fn verdict(dns: &Value, tcp: &Value, http: &Value) -> (&'static str, String, Vec
     }
     if !http_err.is_empty() {
         let lower = http_err.to_lowercase();
+        let plaintext_on_tls =
+            lower.contains("invalidcontenttype") || lower.contains("corrupt message");
         if proxy_configured {
             let direct_note = if tcp_ok == Some(false) {
                 "; 独立直连 TCP 探测也失败，但它绕过了应用 HTTP 代理"
             } else {
                 ""
             };
+            let suffix = if plaintext_on_tls {
+                "；TLS 握手收到明文响应（常见于本机代理协议误填 https://）"
+            } else {
+                ""
+            };
+            let mut advice = Vec::new();
+            if plaintext_on_tls {
+                advice.push("检查系统代理或自定义代理协议：本机 HTTP 代理通常应填 http://127.0.0.1:端口，勿填 https://".into());
+            }
+            advice.push("确认本机代理服务正在运行，并检查当前代理节点".into());
+            advice.push("关闭代理的 HTTPS 解密功能后重试，或切换代理节点".into());
             return (
                 "proxy_fail",
-                format!("应用 HTTP 请求经已配置代理失败：{http_err}{direct_note}"),
-                vec![
-                    "确认本机代理服务正在运行，并检查当前代理节点".into(),
-                    "关闭代理的 HTTPS 解密功能后重试，或切换代理节点".into(),
-                ],
+                format!("应用 HTTP 请求经已配置代理失败：{http_err}{direct_note}{suffix}"),
+                advice,
             );
         }
         let certificate = lower.contains("certificate");
-        let handshake = lower.contains("tls")
+        let handshake = plaintext_on_tls
+            || lower.contains("tls")
             || lower.contains("ssl")
             || lower.contains("handshake");
         return (
@@ -287,6 +298,8 @@ fn verdict(dns: &Value, tcp: &Value, http: &Value) -> (&'static str, String, Vec
             },
             if certificate {
                 format!("TLS 证书校验失败：{http_err}")
+            } else if plaintext_on_tls {
+                format!("HTTPS 请求收到非 TLS 明文响应（InvalidContentType）：{http_err}；常见于 DNS 污染、运营商/校园网明文劫持，或代理协议误配 https://")
             } else if handshake {
                 format!("HTTP TLS 握手失败：{http_err}；可能发生在代理、目标站点或中间网络，不能仅凭握手错误判定中间人拦截")
             } else if tcp_ok == Some(false) {
@@ -298,6 +311,11 @@ fn verdict(dns: &Value, tcp: &Value, http: &Value) -> (&'static str, String, Vec
                 vec![
                     "检查代理的 HTTPS 解密设置和系统时间".into(),
                     "换一个网络或代理节点对照".into(),
+                ]
+            } else if plaintext_on_tls {
+                vec![
+                    "若开启了本地代理，确认系统/环境变量中未把 http:// 误设为 https://".into(),
+                    "更换 DNS（如 223.5.5.5 / 1.1.1.1）、开启代理，或切换 Wi-Fi/蜂窝网络对照".into(),
                 ]
             } else if handshake {
                 vec![
@@ -434,6 +452,10 @@ async fn probe_proxy_origin(
 fn proxy_probe_error(error: reqwest::Error) -> String {
     // reqwest's nested transport errors can contain the configured proxy URL.
     // Report the useful category without copying a credential-bearing address.
+    let chain = crate::net::err_text(&error);
+    if chain.contains("InvalidContentType") || chain.contains("corrupt message") {
+        return "代理或目标 TLS 握手收到明文响应（若本机代理填了 https:// 请改为 http://）".into();
+    }
     if error.is_timeout() {
         "代理连通性测试超时"
     } else if error.is_connect() {

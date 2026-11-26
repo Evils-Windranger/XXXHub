@@ -349,3 +349,102 @@ class MainActivity : TauriActivity() {
   }
   console.log("[splash] Android 标准版系统栏、软键盘安全区与深链桥接已写入 MainActivity.kt");
 }
+
+// Release size optimization (shared by standard & TV Android builds): keep rules for Tauri/JS bridges,
+// strip unused AndroidX locales, enable R8 resource shrinking, compress native .so in APK, and exclude license metadata.
+const androidAppDir = join(root, "src-tauri", "gen", "android", "app");
+const gradlePath = join(androidAppDir, "build.gradle.kts");
+if (existsSync(gradlePath)) {
+  const proguardPath = join(androidAppDir, "proguard-hghubx.pro");
+  const proguardRules = `-keep class com.hghubx.** { *; }
+-keep class app.tauri.** { *; }
+-keepattributes *Annotation*
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+`;
+  if (!existsSync(proguardPath) || readFileSync(proguardPath, "utf8") !== proguardRules) {
+    writeFileSync(proguardPath, proguardRules);
+  }
+
+  const gradleRaw = readFileSync(gradlePath, "utf8");
+  let gradleNext = gradleRaw;
+  if (!gradleNext.includes("// hghubx-size-opt")) {
+    if (!/\bresourceConfigurations\b/.test(gradleNext)) {
+      const dcMatch = gradleNext.match(/\bdefaultConfig\s*\{/);
+      if (!dcMatch) fail(gradlePath, "缺少 defaultConfig 块");
+      const insertAt = dcMatch.index + dcMatch[0].length;
+      gradleNext =
+        gradleNext.slice(0, insertAt) +
+        '\n        resourceConfigurations += listOf("zh", "zh-rCN", "zh-rTW", "zh-rHK", "en")' +
+        gradleNext.slice(insertAt);
+    }
+    if (!/\bisShrinkResources\b/.test(gradleNext)) {
+      const relMatch = gradleNext.match(/getByName\("release"\)\s*\{[\s\S]*?isMinifyEnabled\s*=\s*true/);
+      if (!relMatch) fail(gradlePath, "缺少 release isMinifyEnabled 配置");
+      const insertAt = relMatch.index + relMatch[0].length;
+      gradleNext =
+        gradleNext.slice(0, insertAt) +
+        "\n            isShrinkResources = true" +
+        gradleNext.slice(insertAt);
+    }
+    if (!/^\s{4}packaging\s*\{/m.test(gradleNext)) {
+      const androidMatch = gradleNext.match(/(?:^|\n)android\s*\{/);
+      if (!androidMatch) fail(gradlePath, "缺少 android { 块");
+      let idx = androidMatch.index + androidMatch[0].length;
+      let depth = 1;
+      let closeIdx = -1;
+      let quote = "";
+      while (idx < gradleNext.length) {
+        const ch = gradleNext[idx];
+        const nextCh = gradleNext[idx + 1] || "";
+        if (!quote && ch === "/" && nextCh === "/") {
+          const nl = gradleNext.indexOf("\n", idx);
+          idx = nl === -1 ? gradleNext.length : nl + 1;
+          continue;
+        }
+        if (!quote && ch === "/" && nextCh === "*") {
+          const end = gradleNext.indexOf("*/", idx + 2);
+          idx = end === -1 ? gradleNext.length : end + 2;
+          continue;
+        }
+        if (quote) {
+          if (ch === "\\") { idx += 2; continue; }
+          if (ch === quote) quote = "";
+        } else {
+          if (ch === '"' || ch === "'") quote = ch;
+          else if (ch === "{") depth += 1;
+          else if (ch === "}") {
+            depth -= 1;
+            if (depth === 0) { closeIdx = idx; break; }
+          }
+        }
+        idx += 1;
+      }
+      if (closeIdx === -1) fail(gradlePath, "android { 块未正常闭合");
+      const packagingBlock = `    // hghubx-size-opt
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+        resources {
+            excludes += listOf(
+                "META-INF/LICENSE*",
+                "META-INF/NOTICE*",
+                "META-INF/AL2.0",
+                "META-INF/LGPL2.1",
+                "META-INF/*.kotlin_module",
+                "META-INF/*.version",
+                "DebugProbesKt.bin"
+            )
+        }
+    }
+`;
+      gradleNext = gradleNext.slice(0, closeIdx) + packagingBlock + gradleNext.slice(closeIdx);
+    }
+    if (gradleNext !== gradleRaw) {
+      writeFileSync(gradlePath, gradleNext);
+    }
+  }
+  console.log("[splash] Android 构建体积优化（R8 资源裁剪 / 语言筛选 / .so 压缩 / ProGuard keep）已写入 build.gradle.kts");
+}

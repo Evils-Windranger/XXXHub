@@ -1,4 +1,4 @@
-import Hls from "hls.js";
+import { platform } from "../../shared/api/api";
 
 /**
  * App-level loudness leveling for HTML video playback.
@@ -81,7 +81,8 @@ function audioContextCtor(): typeof AudioContext | null {
 
 /** True when the runtime supports MSE + Web Audio leveling (hides toggle on iOS native AVPlayer). */
 export function isBalanceVolumeSupported(): boolean {
-  return Boolean(audioContextCtor()) && Hls.isSupported();
+  return Boolean(audioContextCtor()) && platform !== "ios"
+    && typeof window !== "undefined" && Boolean(window.MediaSource || "ManagedMediaSource" in window);
 }
 
 function createContext(): AudioContext | null {

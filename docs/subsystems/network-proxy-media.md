@@ -16,13 +16,14 @@
 - 下载与重试：[`src-tauri/src/net/edge.rs`](../../src-tauri/src/net/edge.rs) 的 `retryable_error()`、
   `with_retry()`、`fetch_bytes()`、`fetch_bytes_with_url()`（`edge_redirect_target()` 仅用于 `#[cfg(test)]`）。
 - 源沙箱 HTTP 与加密原语：[`src-tauri/src/source/runtime.rs`](../../src-tauri/src/source/runtime.rs) 的
-  `host_http_request()`、`run_crypto_op()`（`host.fetch` 与 `host.crypto`）。
+  `host_http_request()`、`send_host_attempt()`、`run_crypto_op()`（`host.fetch` 与 `host.crypto`）。
 - 线路基准同步：[`src-tauri/src/net/line.rs`](../../src-tauri/src/net/line.rs) 的
   `base()`、`sync_base_for_source()`、`normalize_base()`。
 - 客户端与 DNS 固定：[`src-tauri/src/net/client.rs`](../../src-tauri/src/net/client.rs) 的
-  `build_client()`、`ProxyRoute`、`client_key()`、`client_for_dns()`、
-  `CLIENTS`、`CLIENT_TTL`、`refresh_client()`、`RequestScope`、`request_scope()`、
-  `refresh_media_scope()`、`system_proxy_fingerprint()`、`get()`、`get_with_dns()`。
+  `build_client()`、`ProxyRoute`、`client_key()`、`client_for_dns()`、`prefers_public_dns()`、
+  `mark_public_dns()`、`CLIENTS`、`CLIENT_TTL`、`refresh_client()`、`RequestScope`、`request_scope()`、
+  `refresh_media_scope()`、`system_proxy_fingerprint()`、`get()`、`get_with_dns()`；
+  `reqwest` 精简启用 `rustls-tls`、`system-proxy`、`socks`、`gzip`、`json`（不含 `brotli`/`charset`）。
 - 代理配置：[`src-tauri/src/proxy.rs`](../../src-tauri/src/proxy.rs) 的 `Mode`、`Config`、
   `bind()`、`set()`、`normalize_proxy()`、`write_atomic()`；系统探测在
   [`src-tauri/src/net/proxy_env.rs`](../../src-tauri/src/net/proxy_env.rs) 的
@@ -49,10 +50,12 @@
 ## 主运行时路径
 
 1. 业务接口由各模块经 `Api::source_call()` / `account_source_call()` 委托给 QuickJS 视频源插件；
-   插件通过 `host.fetch()`（即 `host_http_request()`）发起 HTTPS 请求，复用相同代理、DNS 固定、
-   严格模式校验与最多 5 跳重定向守卫，并强制校验目标与重定向 origin 属于 `manifest.network`
-   白名单、过滤 `Cookie`/`Host` 等受限头、限制响应体积 2 MB。`source/runtime.rs` 将插件抛出的
-   `"401"` / `status: 401` / `"HTTP 401..."` 统一规范为 `"401"`，其余 `"HTTP <nnn>..."`
+   插件通过 `host.fetch()`（即 `host_http_request()`）发起 HTTPS 请求，复用 `net::client_for_dns()`
+   （共享 `CLIENTS` 30 秒连接池与固定 DNS 缓存，按同一代理/严格模式/重定向守卫运行），并强制校验目标与重定向
+   origin 属于 `manifest.network` 白名单、过滤 `Cookie`/`Host` 等受限头、限制响应体积 2 MB。直连无代理且遇
+   `media_dns::eligible()` 错误（含 `InvalidContentType` 明文响应、超时、DNS 失败；非幂等写请求仅在连接/TLS 握手
+   尚未发出 HTTP 请求前重试）时自动切换至 AliDNS DoH 回退并在 `MEDIA_DNS_ROUTES` 记忆成功路由。
+   `source/runtime.rs` 将插件抛出的 `"401"` / `status: 401` / `"HTTP 401..."` 统一规范为 `"401"`，其余 `"HTTP <nnn>..."`
    原样透传以供前端识别 403 并触发自动切线。
 2. `with_retry()` 只对逻辑 GET、无 body 的请求重试，最多 3 次；408/425/429/5xx、超时/连接类
    错误可重试，401、404、403、地址策略拒绝和重定向错误一次即终止。重试前 `heal_client()` 会在
@@ -75,7 +78,9 @@
    范围退回完整 200，越界返回 416。m3u8 永远完整返回，避免原生播放器的 0-1 字节探测把
    `#EXTM3U` 截掉。Linux 的 loopback HTTP 还支持 HEAD，并只发送一份 `Content-Length`/CORS 头。
 8. `diagnose()` 用与真实请求相同的路径做 DNS → TCP → HTTP 探测，读取 Windows 注册表、
-   macOS `scutil`、Linux `gsettings` 和进程环境变量，输出 `verdict/summary/advice`。`test_proxy()`
+   macOS `scutil`、Linux `gsettings` 和进程环境变量，输出 `verdict/summary/advice`。`heal_client()`、`verdict()` 与
+   `proxy_probe_error()` 均识别 `InvalidContentType` / `corrupt message`（TLS 端口返回明文 HTTP），
+   在有代理时提示核对本机 HTTP 代理协议勿误填 `https://`，直连时归类 `tls_fail` 并给出切 DNS/代理建议。`test_proxy()`
    通过 `probe_proxy_origin()` 对当前激活 origin 发起 `GET {origin}/`（尊重 `strict` 校验并跟进最多 5 跳
    `301|302|303` 重定向）；未导入源或 `base()` 为空时直接返回明确提示。代理地址只保留协议/主机/端口，
    `NO_PROXY` 只报“已配置”，错误链中的 userinfo 替换成 `[redacted]@`。

@@ -7,6 +7,8 @@
        transport needs an HTTP exception. Earlier iOS versions allow IPs. -->
   <key>NSAppTransportSecurity</key>
   <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
     <key>NSExceptionDomains</key>
     <dict>
       <key>127.0.0.1</key>
@@ -16,5 +18,20 @@
       </dict>
     </dict>
   </dict>
+  <key>NSCameraUsageDescription</key>
+  <string>扫描电视端二维码以配置视频源并同步数据</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>发现并连接同一局域网内的电视端以推送视频源与同步数据</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>com.hghubx.app</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>hghubx</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>

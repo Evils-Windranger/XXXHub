@@ -347,7 +347,7 @@ export function useFeedViewport({
     wake();
     keepAlive();
     if (!isDesktop) {
-      try { void invoke("set_orientation", { landscape }); } catch { /* ignore */ }
+      try { void invoke("set_orientation", { landscape }).catch(() => {}); } catch { /* ignore */ }
       if (landscape) {
         try {
           (screen.orientation as unknown as { lock?: (o: string) => Promise<void> })?.lock?.("landscape")?.catch(() => {});

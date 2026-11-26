@@ -27,7 +27,6 @@ pub(crate) fn build_client(host: &str, addrs: &[SocketAddr], route: &ProxyRoute)
         .redirect(reqwest::redirect::Policy::none())
         .referer(false)
         .gzip(true)
-        .brotli(true)
         .pool_idle_timeout(Duration::from_secs(60));
     if !addrs.is_empty() {
         builder = builder.resolve_to_addrs(host, addrs);
@@ -208,7 +207,7 @@ pub(super) fn client_key(strict: bool, host: &str, port: u16, public_dns: bool, 
     format!("{strict}:{host}:{port}:{public_dns}:{}:{:x}:{}", route.active, route.fingerprint(), route.generation)
 }
 
-async fn client_for_dns(raw: &str, public_dns: bool) -> Result<(url::Url, Arc<reqwest::Client>), String> {
+pub(crate) async fn client_for_dns(raw: &str, public_dns: bool) -> Result<(url::Url, Arc<reqwest::Client>), String> {
     let strict = network_policy::strict_security();
     let target = network_policy::parse_target_with_mode(raw, strict)?;
     let host = target.host_str().ok_or("目标缺少主机名")?;
@@ -261,6 +260,23 @@ pub fn refresh_client() {
     }
     if let Ok(mut routes) = MEDIA_DNS_ROUTES.lock() {
         *routes = crate::media_dns::Routes::default();
+    }
+}
+
+pub(crate) fn prefers_public_dns(host: &str) -> bool {
+    MEDIA_DNS_ROUTES
+        .lock()
+        .ok()
+        .is_some_and(|routes| routes.prefers_public(host, Instant::now()))
+}
+
+pub(crate) fn mark_public_dns(host: &str, ok: bool) {
+    if let Ok(mut routes) = MEDIA_DNS_ROUTES.lock() {
+        if ok {
+            routes.remember(host, Instant::now());
+        } else {
+            routes.forget(host);
+        }
     }
 }
 

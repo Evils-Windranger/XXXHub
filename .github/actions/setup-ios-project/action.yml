@@ -1,10 +1,10 @@
 name: Setup iOS Project
-description: Run tauri ios init and patch Info.plist for portrait/landscape orientations and ATS.
+description: Run tauri ios init and patch Info.plist for portrait/landscape orientations and camera access.
 
 runs:
   using: composite
   steps:
-    - name: 生成 iOS 工程（带横竖屏 + ATS）
+    - name: 生成 iOS 工程（带横竖屏与相机权限）
       shell: bash
       run: |
         pnpm tauri ios init --ci
@@ -16,9 +16,6 @@ runs:
             /usr/libexec/PlistBuddy -c "Add :${key}:1 string UIInterfaceOrientationLandscapeLeft" "$plist"
             /usr/libexec/PlistBuddy -c "Add :${key}:2 string UIInterfaceOrientationLandscapeRight" "$plist"
           done
-          /usr/libexec/PlistBuddy -c "Delete :NSAppTransportSecurity" "$plist" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$plist"
-          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$plist"
           /usr/libexec/PlistBuddy -c "Delete :NSCameraUsageDescription" "$plist" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 扫描电视端二维码以配置视频源并同步数据" "$plist"
         done

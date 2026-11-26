@@ -57,6 +57,43 @@ fn is_forbidden_header(name: &str) -> bool {
     )
 }
 
+async fn send_host_attempt(
+    method_upper: &str,
+    target: &url::Url,
+    headers: &HashMap<String, String>,
+    body: Option<&str>,
+    timeout: Duration,
+    public_dns: bool,
+) -> Result<reqwest::Response, (String, bool)> {
+    let (pinned_url, client) = crate::net::client_for_dns(target.as_str(), public_dns)
+        .await
+        .map_err(|e| (e, true))?;
+    let req_method = reqwest::Method::from_bytes(method_upper.as_bytes())
+        .map_err(|_| ("无效的 HTTP 方法".to_string(), true))?;
+    let mut req = client.request(req_method, pinned_url).timeout(timeout);
+    for (k, v) in headers {
+        if !is_forbidden_header(k) {
+            req = req.header(k.as_str(), v.as_str());
+        }
+    }
+    if let Some(b) = body {
+        if matches!(method_upper, "POST" | "PUT" | "DELETE") {
+            req = req.body(b.to_string());
+        }
+    }
+    req.send().await.map_err(|e| {
+        let pre_connect = e.is_connect();
+        let msg = crate::net::err_text(&e);
+        let safe_before_request = pre_connect
+            || msg.contains("InvalidContentType")
+            || msg.contains("corrupt message")
+            || msg.contains("handshake")
+            || msg.contains("DNS")
+            || msg.contains("dns");
+        (msg, safe_before_request)
+    })
+}
+
 /// Strictly validated HTTP fetch shared by `host.fetch` and `source_import` / `source_check_update`.
 pub(crate) async fn host_http_request(
     method: &str,
@@ -90,39 +127,76 @@ pub(crate) async fn host_http_request(
         }
     }
 
-    let proxy_cfg = crate::proxy::Config {
-        mode: crate::proxy::mode(),
-        url: crate::proxy::custom_url().unwrap_or_default(),
-    };
     let strict = crate::network_policy::strict_security();
+    let is_idempotent = matches!(method_upper.as_str(), "GET" | "HEAD");
+    let timeout = Duration::from_secs(timeout_secs.clamp(2, 20));
     for hop in 0..=MAX_REDIRECTS {
         let host = current
             .host_str()
             .ok_or_else(|| "URL 缺少主机名".to_string())?
             .to_string();
-        let route = crate::net::ProxyRoute::for_config(&proxy_cfg, &current);
-        let addrs = if route.active {
-            Vec::new()
-        } else {
-            crate::network_policy::resolve_target(&current, strict).await?
+        if current.scheme() != "https" && strict {
+            return Err("严格模式下仅允许 https:// 请求".into());
+        }
+        let proxy_active = crate::net::proxy_active(&current);
+        let use_public_dns = !proxy_active && crate::net::prefers_public_dns(&host);
+        let mut resp = match send_host_attempt(
+            &method_upper,
+            &current,
+            headers,
+            body,
+            timeout,
+            use_public_dns,
+        )
+        .await
+        {
+            Ok(r) => {
+                if use_public_dns {
+                    crate::net::mark_public_dns(&host, true);
+                }
+                r
+            }
+            Err((first_err, safe_pre_connect)) => {
+                if use_public_dns {
+                    crate::net::mark_public_dns(&host, false);
+                }
+                crate::net::heal_client(&first_err);
+                let can_fallback = !proxy_active
+                    && crate::media_dns::eligible(&current, &first_err)
+                    && (is_idempotent || safe_pre_connect);
+                if can_fallback {
+                    let retry_public = !use_public_dns;
+                    match send_host_attempt(
+                        &method_upper,
+                        &current,
+                        headers,
+                        body,
+                        timeout,
+                        retry_public,
+                    )
+                    .await
+                    {
+                        Ok(r) => {
+                            if retry_public {
+                                crate::net::mark_public_dns(&host, true);
+                            }
+                            r
+                        }
+                        Err((retry_err, _)) => {
+                            if retry_public {
+                                crate::net::mark_public_dns(&host, false);
+                            }
+                            if retry_public && retry_err.contains("备用 DNS") {
+                                return Err(first_err);
+                            }
+                            return Err(retry_err);
+                        }
+                    }
+                } else {
+                    return Err(first_err);
+                }
+            }
         };
-        let client = crate::net::build_client(&host, &addrs, &route)?;
-        let req_method = reqwest::Method::from_bytes(method_upper.as_bytes())
-            .map_err(|_| "无效的 HTTP 方法".to_string())?;
-        let mut req = client
-            .request(req_method, current.as_str())
-            .timeout(Duration::from_secs(timeout_secs.clamp(2, 20)));
-        for (k, v) in headers {
-            if !is_forbidden_header(k) {
-                req = req.header(k.as_str(), v.as_str());
-            }
-        }
-        if let Some(b) = body {
-            if matches!(method_upper.as_str(), "POST" | "PUT" | "DELETE") {
-                req = req.body(b.to_string());
-            }
-        }
-        let mut resp = req.send().await.map_err(|e| crate::net::err_text(&e))?;
         let status = resp.status().as_u16();
         if matches!(status, 301 | 302 | 303 | 307 | 308) {
             if hop == MAX_REDIRECTS {
@@ -223,11 +297,10 @@ fn run_crypto_op(vault: &RefCell<CryptoVault>, req: &Value) -> Result<Value, Str
     let rng = SystemRandom::new();
     match op {
         "sha256Hex" => {
-            use sha2::{Digest, Sha256};
             let text = req.get("text").and_then(Value::as_str).unwrap_or("");
-            let digest = Sha256::digest(text.as_bytes());
+            let digest = ring::digest::digest(&ring::digest::SHA256, text.as_bytes());
             let mut hex = String::with_capacity(64);
-            for b in digest {
+            for b in digest.as_ref() {
                 use std::fmt::Write;
                 let _ = write!(&mut hex, "{b:02x}");
             }
