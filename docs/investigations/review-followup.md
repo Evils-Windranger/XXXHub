@@ -12,7 +12,7 @@ P2、P3 子编号按维护者原文的列举顺序补齐。修正均在 `securit
 | P1-1 | 修正 | 54511e0 | 固定使用 tauri-plugin-opener 2.7.2 / open 5.4.5，经现有 Rust HTTP(S)/地址校验后以 with=None 调用默认处理器。Windows 启用 shellexecute-on-windows，完整 URL 交给 ShellExecuteExW，不回退 cmd。关闭自动接管链接，不授予前端 opener:* 权限；最低 Rust 调整为 1.90。 |
 | P1-2 | 保持 | — | 当前门禁用 is_some_and，缺失 Origin 已获允许；Origin: null 会被拒绝。结合用户反馈的 macOS 实测，未证实该兼容问题，因此未增加 null 的泛化放行。 |
 | P1-3 | 保持 | — | 锁定版本的 tauri-codegen 具有 inject_script_hashes，自动对入口 HTML 的内联脚本生成 CSP SHA-256 hash，并将其并入运行时策略。与用户 macOS 无异常的观察一致，无需 unsafe-inline，也未移除提前应用主题的脚本。 |
-| P2-1 | 修正 | f3c8df1 | 注意真实传输层始终是 POST /api/edge/request 信封。仅无 token、无逻辑 body 的 GET 可跟随 301/302/303；逐跳检查 URL、DNS/固定地址及 HTTPS 降级，最多 5 跳。保留信封 POST，不让客户端自动改成 GET。307/308、带凭据或逻辑请求体的请求均拒绝。 |
+| P2-1 | 修正 | f3c8df1 | 注意真实传输层始终是 POST 加密业务网关信封。仅无 token、无逻辑 body 的 GET 可跟随 301/302/303；逐跳检查 URL、DNS/固定地址及 HTTPS 降级，最多 5 跳。保留加密信封 POST，不让客户端自动改成 GET。307/308、带凭据或逻辑请求体的请求均拒绝。 |
 | P2-2 | 修正 | d3c4094 | 客户端缓存改为按严格模式、主机、端口查询，已验证的 DNS 地址随客户端固定，30 秒 TTL 不因命中延长。到期重新解析并检查全部结果；模式/代理刷新会清空缓存。 |
 | P2-3 | 补充文档 | 58ec4b5 | 明确 NAT64/DNS64、IPv6-only 和混合 DNS 答案的限制，以及兼容回退方式。仅配置 HTTP 代理不一定能修复本地 DNS64 解析。 |
 | P2-4 | 修正 | efbb664 | 移除 localStorage 安全偏好。Rust security.json 是持久化真源，前端启动默认严格，收到 app_boot 后同步。设置先保存后更新有效状态；后端写入失败会返回错误并保持旧模式。保存中/尚未初始化时禁用设置开关。当前文章随 context 更新并重新清洗。 |

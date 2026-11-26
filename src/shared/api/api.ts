@@ -40,9 +40,11 @@ export const isMobile = isAndroid || isIos;
 export const LOCAL =
   isMacos || isIos ? "hg://localhost" : isLinux ? "http://127.0.0.1:17650" : "http://hg.localhost";
 
-/** 封面：经本地协议加载或解码。 */
+const SAFE_INLINE_IMAGE = /^data:image\/(?:svg\+xml|png|jpeg|webp|gif)(?:;charset=[^;,]+)?(?:;base64)?,/i;
+
+/** 封面：经本地协议加载或解码（离线示例的静态 data:image 内联图直接透传）。 */
 export const cover = (url?: string, _w = 480) =>
-  url ? `${LOCAL}/img?u=${encodeURIComponent(url)}` : "";
+  !url ? "" : SAFE_INLINE_IMAGE.test(url) ? url : `${LOCAL}/img?u=${encodeURIComponent(url)}`;
 
 /** 播放列表：经本地协议改写分片地址，规避 CORS 与防盗链。 */
 export const playlist = (url: string) => `${LOCAL}/hls?u=${encodeURIComponent(url)}`;

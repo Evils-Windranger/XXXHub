@@ -9,6 +9,7 @@ import { Modal, Sheet } from "../../shared/ui/ui";
 import { ICheck, IClose, ILink, IRefresh, IScan } from "../../shared/ui/icons";
 import { tr } from "../../shared/i18n";
 import { pasteText } from "../../shared/lib/clipboard";
+import { buildDemoOfflinePackageJson, isDemoOfflineSource } from "../../shared/lib/demoSource";
 import TvQrSyncModal from "./TvQrSyncModal";
 
 function notifySourceChanged() {
@@ -52,6 +53,22 @@ export default function SourceManager({ open, onClose }: { open: boolean; onClos
       await load();
       notifySourceChanged();
       toast(tr("已导入 {0} v{1}", summary.name, summary.version), "ok");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e || tr("失败")));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const tryDemoOffline = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.sourceImport(buildDemoOfflinePackageJson(), true);
+      await load();
+      notifySourceChanged();
+      toast(tr("已启用离线示例源（仅演示）"), "ok");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e || tr("失败")));
     } finally {
@@ -193,8 +210,11 @@ export default function SourceManager({ open, onClose }: { open: boolean; onClos
           <div className="px-1 text-[12px] font-semibold text-dim">{tr("已安装")}</div>
 
           {!state?.sources.length ? (
-            <Surface className="rounded-(--r-md) bg-s2 p-4 text-center text-[12px] text-mut">
-              {tr("暂无视频源")}
+            <Surface className="rounded-(--r-md) bg-s2 p-4 text-center space-y-2.5">
+              <div className="text-[12px] text-mut">{tr("暂无视频源")}</div>
+              <Button disabled={busy} onClick={() => void tryDemoOffline()} className="h-8 px-3 rounded-(--r-sm) bg-s3 text-[12px] text-on pressable disabled:opacity-50">
+                {tr("试用离线示例源")}
+              </Button>
             </Surface>
           ) : state.sources.map((src) => {
             const t = tests[src.id];
@@ -203,6 +223,11 @@ export default function SourceManager({ open, onClose }: { open: boolean; onClos
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-[14px] font-semibold text-on truncate">{src.name}</span>
                   <span className="text-[11px] px-1.5 py-0.5 rounded bg-s4 text-mut font-mono">v{src.version}</span>
+                  {isDemoOfflineSource(src) && (
+                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium">
+                      {tr("仅演示")}
+                    </span>
+                  )}
                   {src.active && (
                     <span className="inline-flex items-center gap-0.5 text-[11px] px-1.5 py-0.5 rounded bg-primary/20 text-primary font-medium">
                       <ICheck size={11} /> {tr("使用中")}

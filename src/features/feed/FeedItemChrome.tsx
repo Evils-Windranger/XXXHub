@@ -15,6 +15,7 @@ import type { FeedMeta } from "./useFeedActions";
 import type { FeedPanel } from "./useFeedViewport";
 import "../../styles/video-details.css";
 import { tr } from "../../shared/i18n";
+import { hasPlaybackCapability, isDemoOfflineSource } from "../../shared/lib/demoSource";
 
 function MobileTagHint() {
   const tagHint = useTagHint();
@@ -98,7 +99,8 @@ export default function FeedItemChrome({
   muted, onToggleMuted, swipeEnabled, swipeEp, onToggleSwipe, onLock,
   onBarDown, onBarMove, onBarUp, onRetryStream, toast,
 }: Props) {
-  const { capabilities } = useStore();
+  const { capabilities, activeSource } = useStore();
+  const playbackDisabled = kind === "video" && !hasPlaybackCapability(capabilities);
   const episodes = meta.episodes;
   const activePct = barPct ?? (scrub ? scrub.pct / 100 : null);
   const scrubbing = isActive && activePct !== null;
@@ -275,7 +277,7 @@ export default function FeedItemChrome({
             </div>
           )}
           <div className="relative pt-1.5 pb-2.5">
-            {isActive && <div ref={barRef} data-seek-bar data-scrubbing={scrubbing || undefined}
+            {isActive && !playbackDisabled && <div ref={barRef} data-seek-bar data-scrubbing={scrubbing || undefined}
               className="-mt-0.5 -mb-2.5 relative pointer-events-auto"
               style={{
                 height: 36,
@@ -323,22 +325,43 @@ export default function FeedItemChrome({
               </Button> : <Button aria-label={tr("图文详情")} onClick={() => setPanel("detail")} className="mobile-playback-episodes">
                 <IFileText size={18} /><span>{tr("图文详情")}</span><IChevronUp size={16} />
               </Button>}
-              <Button onClick={onToggleMuted} aria-label={muted ? tr("取消静音") : tr("静音")} aria-pressed={muted}
-                className="mobile-playback-quick">
+              <Button disabled={playbackDisabled} onClick={onToggleMuted} aria-label={muted ? tr("取消静音") : tr("静音")} aria-pressed={muted}
+                className={`mobile-playback-quick ${playbackDisabled ? "opacity-40 cursor-not-allowed" : ""}`}>
                 {muted ? <IVolMute size={18} /> : <IVol size={18} />}
               </Button>
-              {swipeEnabled && capabilities.detail.episodes && <Button onClick={onToggleSwipe} aria-label={swipeEp ? tr("关闭上下划切集") : tr("开启上下划切集")} aria-pressed={swipeEp}
-                className={`mobile-playback-quick ${swipeEp ? "is-on" : ""}`}>
+              {swipeEnabled && capabilities.detail.episodes && <Button disabled={playbackDisabled} onClick={onToggleSwipe} aria-label={swipeEp ? tr("关闭上下划切集") : tr("开启上下划切集")} aria-pressed={swipeEp}
+                className={`mobile-playback-quick ${swipeEp ? "is-on" : ""} ${playbackDisabled ? "opacity-40 cursor-not-allowed" : ""}`}>
                 <IVertSwap size={18} />
               </Button>}
-              <Button aria-label={tr("全屏")} onClick={() => enterFs(landscapeVideo)} className="mobile-playback-fullscreen"><IExpand size={19} /></Button>
+              <Button disabled={playbackDisabled} aria-label={tr("全屏")} onClick={() => enterFs(landscapeVideo)} className={`mobile-playback-fullscreen ${playbackDisabled ? "opacity-40 cursor-not-allowed" : ""}`}><IExpand size={19} /></Button>
             </div>}
           </div>
         </div>
       )}
 
-      {/* 暂停 / 缓冲 */}
-      {isActive && paused && !err && !scrubbing && (
+      {/* 暂停 / 缓冲 / 示例置灰占位 */}
+      {isActive && playbackDisabled && !err && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center px-5 pointer-events-none">
+          <div className="max-w-[300px] rounded-2xl px-5 py-4 flex flex-col items-center gap-2.5 text-center backdrop-blur-md pointer-events-auto elev-2"
+            style={{ background: "rgba(9,14,22,.76)", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.12)" }}>
+            <Button type="button" disabled aria-disabled="true" aria-label={tr("播放不可用")}
+              className="w-14 h-14 rounded-full flex items-center justify-center bg-white/10 text-white/45 cursor-not-allowed">
+              <IPlayF size={24} className="ml-0.5" />
+            </Button>
+            <div className="text-[14px] font-semibold text-white">
+              {isDemoOfflineSource(activeSource) ? tr("离线示例源 · 暂不提供播放") : tr("当前视频源未开启播放")}
+            </div>
+            <p className="text-[12px] leading-relaxed text-white/75 m-0">
+              {tr("可体验首页、搜索、标签、详情、选集与能力裁剪，导入真实视频源后即可播放")}
+            </p>
+            <Button type="button" onClick={() => setPanel(capabilities.detail.episodes ? "episodes" : "detail")}
+              className="mt-0.5 h-8 px-3.5 rounded-full bg-white/15 text-[12px] font-medium text-white pressable">
+              {capabilities.detail.episodes ? tr("查看详情与选集") : tr("查看详情")}
+            </Button>
+          </div>
+        </div>
+      )}
+      {isActive && !playbackDisabled && paused && !err && !scrubbing && (
         <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
           <Button type="button" aria-label={tr("播放")} onClick={onTogglePlay}
             className="w-[66px] h-[66px] rounded-full flex items-center justify-center backdrop-blur-md pointer-events-auto pressable"
@@ -347,7 +370,7 @@ export default function FeedItemChrome({
           </Button>
         </div>
       )}
-      {isActive && waiting && !err && !paused && (
+      {isActive && !playbackDisabled && waiting && !err && !paused && (
         <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none"><Loader className="w-9 h-9 spinner" /></div>
       )}
       {isActive && err && (

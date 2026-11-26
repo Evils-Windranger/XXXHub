@@ -16,6 +16,8 @@ import ResizeHandles from "./shell/ResizeHandles";
 import { tracePlayback } from "../shared/diagnostics/playbackDiagnostics";
 import { IGrid, IGridF, IHome, IHomeF, ISearch, IUser, IUserF } from "../shared/ui/icons";
 import { tr, useLocale } from "../shared/i18n";
+import DemoSourceBanner from "./DemoSourceBanner";
+import { isDemoOfflineSource } from "../shared/lib/demoSource";
 
 // Local chunks load on first visit; visited tabs stay mounted as before.
 // Feed (+ hls.js) is separated from the initial shell so cold start mounts chrome and
@@ -335,7 +337,7 @@ function MainTabs({ wide, pageActive, covered, bottomInset }: { wide: boolean; p
 }
 
 function AppBody() {
-  const { platform, tab, setTab, stack, pop, loginOpen, setLoginOpen, fs, setFs, clean, locked } = useStore();
+  const { platform, tab, setTab, stack, pop, loginOpen, setLoginOpen, fs, setFs, clean, locked, activeSource } = useStore();
   const availableTabs = useAvailableTabs();
   const mainRef = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(false);
@@ -381,25 +383,29 @@ function AppBody() {
      底部只让出安全区。之前多留了 20px，视频底边会露出一条
      「底栏」似的窄缝（底部的压暗渐变到不了屏幕最底）。 */
   const stackInset = 0;
+  const showDemoBanner = isDemoOfflineSource(activeSource) && !fs && !clean && !locked;
 
   return (
     <div className={`absolute inset-0 flex bg-canvas plat-${platform}`}>
-      <div ref={mainRef} className="relative flex-1 min-w-0 overflow-hidden win-main">
-        <MainTabs wide={wide} pageActive={pageActive} covered={stack.length > 0} bottomInset={bottomInset} />
+      <div ref={mainRef} className="relative flex-1 min-w-0 overflow-hidden win-main flex flex-col">
+        {showDemoBanner && <DemoSourceBanner />}
+        <div className="relative flex-1 min-h-0 overflow-hidden" style={showDemoBanner ? ({ "--sat": "0px" } as CSSProperties) : undefined}>
+          <MainTabs wide={wide} pageActive={pageActive} covered={stack.length > 0} bottomInset={bottomInset} />
 
-        {stack.map((p, i) => {
-          const top = i === stack.length - 1;
-          return (
-            <LayerBox key={p.key} hidden={!top} inert={!top} ariaHidden={!top || loginOpen}
-              className="absolute inset-0 bg-bg isolate"
-              enterClass={platform === "android" && p.kind === "feed" ? undefined : "a-page-in"}
-              style={{ zIndex: 30 + i }}>
-              <StackPage page={p} onBack={pop} wide={wide} top={top} bottomInset={stackInset} loginOpen={loginOpen} />
-            </LayerBox>
-          );
-        })}
+          {stack.map((p, i) => {
+            const top = i === stack.length - 1;
+            return (
+              <LayerBox key={p.key} hidden={!top} inert={!top} ariaHidden={!top || loginOpen}
+                className="absolute inset-0 bg-bg isolate"
+                enterClass={platform === "android" && p.kind === "feed" ? undefined : "a-page-in"}
+                style={{ zIndex: 30 + i }}>
+                <StackPage page={p} onBack={pop} wide={wide} top={top} bottomInset={stackInset} loginOpen={loginOpen} />
+              </LayerBox>
+            );
+          })}
 
-        {!fs && !clean && !locked && stack.length === 0 && <TabBar />}
+          {!fs && !clean && !locked && stack.length === 0 && <TabBar />}
+        </div>
       </div>
     </div>
   );
@@ -428,7 +434,7 @@ function DesktopShell() {
 }
 
 function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boolean }) {
-  const { stack, pop, loginOpen, setLoginOpen, tab, setTab, platform, fs, setFs, setTheater } = useStore();
+  const { stack, pop, loginOpen, setLoginOpen, tab, setTab, platform, fs, setFs, setTheater, clean, locked, activeSource } = useStore();
   const availableTabs = useAvailableTabs();
   const mainRef = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(true);
@@ -470,22 +476,26 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
   }, [stack.length, pop, setTab, loginOpen, setLoginOpen, fs, setFs, theater, setTheater, availableTabs]);
 
   const pageActive = stack.length === 0 && !loginOpen;
+  const showDemoBanner = isDemoOfflineSource(activeSource) && !fs && !clean && !locked;
 
   return (
     <div className={`absolute inset-0 flex bg-canvas plat-${platform}`}>
       {!theater && <DesktopRail collapsed={collapsed} />}
-      <div ref={mainRef} className={`relative flex-1 min-w-0 overflow-hidden win-main ${theater ? "is-theater-main" : ""}`}>
-        <MainTabs wide={wide} pageActive={pageActive} covered={stack.length > 0} bottomInset={14} />
-        {stack.map((p, i) => {
-          const top = i === stack.length - 1;
-          return (
-            <LayerBox key={p.key} hidden={!top} inert={!top} ariaHidden={!top || loginOpen}
-              className="absolute inset-0 bg-bg isolate" enterClass="win-page-in"
-              style={{ zIndex: 30 + i }}>
-              <StackPage page={p} onBack={pop} wide={wide} top={top} bottomInset={14} loginOpen={loginOpen} />
-            </LayerBox>
-          );
-        })}
+      <div ref={mainRef} className={`relative flex-1 min-w-0 overflow-hidden win-main flex flex-col ${theater ? "is-theater-main" : ""}`}>
+        {showDemoBanner && <DemoSourceBanner />}
+        <div className="relative flex-1 min-h-0 overflow-hidden">
+          <MainTabs wide={wide} pageActive={pageActive} covered={stack.length > 0} bottomInset={14} />
+          {stack.map((p, i) => {
+            const top = i === stack.length - 1;
+            return (
+              <LayerBox key={p.key} hidden={!top} inert={!top} ariaHidden={!top || loginOpen}
+                className="absolute inset-0 bg-bg isolate" enterClass="win-page-in"
+                style={{ zIndex: 30 + i }}>
+                <StackPage page={p} onBack={pop} wide={wide} top={top} bottomInset={14} loginOpen={loginOpen} />
+              </LayerBox>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

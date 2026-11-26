@@ -5,6 +5,7 @@ import { Button, Surface, TextArea } from "../../shared/ui/ios/controls";
 import { ILink, IScan, ISettings, Logo } from "../../shared/ui/icons";
 import { tr } from "../../shared/i18n";
 import { pasteText } from "../../shared/lib/clipboard";
+import { buildDemoOfflinePackageJson } from "../../shared/lib/demoSource";
 import TvQrSyncModal from "../../features/settings/TvQrSyncModal";
 
 export default function SourceOnboarding({
@@ -81,6 +82,21 @@ export default function SourceOnboarding({
     }
   };
 
+  const tryDemoOffline = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.sourceImport(buildDemoOfflinePackageJson(), true);
+      toast(tr("已启用离线示例源（仅演示）"), "ok");
+      notify();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e || tr("失败")));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-bg flex flex-col overflow-y-auto">
       <div className="shrink-0 flex items-center justify-between px-4 py-3" style={{ paddingTop: "calc(var(--sat, 0px) + 12px)" }}>
@@ -123,6 +139,20 @@ export default function SourceOnboarding({
               className="w-full h-10 rounded-(--r-ctl) brand-grad text-[14px] font-semibold text-on-primary pressable disabled:opacity-50"
             >
               {busy ? tr("导入中…") : tr("导入")}
+            </Button>
+          </Surface>
+
+          <Surface className="rounded-(--r-md) bg-s2 p-3.5 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium text-on">{tr("试用离线示例源")}</div>
+              <div className="text-[11px] text-mut mt-0.5">{tr("零网络、仅演示界面与能力裁剪，可随时一键移除")}</div>
+            </div>
+            <Button
+              disabled={busy}
+              onClick={() => void tryDemoOffline()}
+              className="shrink-0 h-8 px-3 rounded-(--r-ctl) bg-s3 text-[12px] font-medium text-on pressable disabled:opacity-50"
+            >
+              {tr("试用")}
             </Button>
           </Surface>
 

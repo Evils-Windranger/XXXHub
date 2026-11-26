@@ -322,7 +322,11 @@ pub fn validate_package(pkg: &SourcePackage) -> Result<(), String> {
         return Err("runtime.entry 包含非法路径".into());
     }
     let caps = &pkg.manifest.capabilities;
-    if !caps.search || !caps.detail.episodes || (!caps.playback.hls && !caps.playback.mp4) {
+    let has_playback = caps.playback.hls || caps.playback.mp4;
+    let offline_demo = pkg.manifest.network.origins.is_empty()
+        && pkg.manifest.network.media_origins.is_empty()
+        && pkg.manifest.network.publish_origins.is_empty();
+    if !caps.search || !caps.detail.episodes || (!has_playback && !offline_demo) {
         return Err("视频源缺少必选核心能力（需要 search、detail.episodes 与 playback）".into());
     }
     if pkg.code.trim().is_empty() {

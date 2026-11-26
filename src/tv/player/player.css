@@ -12,6 +12,8 @@
 .tv-detail-tags { display: flex; flex-wrap: wrap; gap: 0.4444rem; margin: 0.7778rem 0; }
 .tv-detail-tags span { font-size: 0.8889rem; line-height: 1.3333rem; border-radius: 0.3333rem; padding: 0.1111rem 0.5rem; background: #182d3e; color: #c5d9e7; }
 .tv-detail-actions { display: flex; flex-wrap: wrap; gap: 0.6667rem; margin-top: 1.1111rem; }
+.tv-detail-demo-note { margin: 0.6667rem 0 0; font-size: 0.9rem; color: #9fc5dd; }
+.tv-detail-episode-grid button.tv-episode-disabled { opacity: 0.56; }
 .tv-detail-episode-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.7778rem; padding: 0.2778rem; }
 /* Every slot keeps one height: short labels, wrapped long titles and the
    extra "上次观看" line must not stretch a single cell. The label clamps to

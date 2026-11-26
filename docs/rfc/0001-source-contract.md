@@ -37,7 +37,7 @@
       "search": true,
       "catalog": { "categories": false, "tags": true, "rankings": false, "authors": false },
       "detail": { "episodes": true, "related": false, "comments": false },
-      "playback": { "hls": true, "mp4": true, "subtitles": false },
+      "playback": { "hls": false, "mp4": false, "subtitles": false },
       "posts": false,
       "account": false,
       "lines": true
@@ -90,5 +90,6 @@
 
 ## 5. 当前实现与配套工具
 
-- 已彻底移除内置站点源回退：未导入或未激活视频源时，标准版展示 `SourceOnboarding`、TV 端展示 `TvLanPushPanel`（局域网扫码推源/同步），业务 IPC 返回未导入提示；`manifest.capabilities` 控制标准版与 TV 端模块显隐。
+- 默认引导与空态：未导入或未激活视频源时，标准版默认停留在 `SourceOnboarding`、TV 端展示 `TvLanPushPanel`（局域网扫码推源/同步），业务 IPC 返回未导入提示；`manifest.capabilities` 控制标准版与 TV 端模块显隐。
+- 内置零网络示例试玩：引导页与源管理页提供「试用离线示例源」次级入口，一键导入 [`examples/sources/demo-offline/`](../../examples/sources/demo-offline/) 并在界面顶部提供一键「移除示例源」；零网络示例源可声明 `playback: { hls: false, mp4: false }`，客户端置灰播放控件并引导导入真实源。
 - 配套工具与示例：[`scripts/pack-source.mjs`](../../scripts/pack-source.mjs)（打包与 Ed25519 签名）、[`examples/sources/demo-offline/`](../../examples/sources/demo-offline/)（零网络离线契约示例源）。

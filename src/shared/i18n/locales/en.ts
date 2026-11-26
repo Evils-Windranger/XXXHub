@@ -917,6 +917,20 @@ const en: Record<string, string> = {
   "发现 {0} 部收藏更新，新增 {1} 集": "{0} favorite(s) updated · {1} new episode(s)",
   "收藏已刷新，暂无新集更新": "Favorites refreshed; no new episodes yet",
   "切镜头": "Switch Lens",
+  "试用离线示例源": "Try Offline Demo Source",
+  "零网络、仅演示界面与能力裁剪，可随时一键移除": "Zero-network UI & capability preview — removable anytime",
+  "试用": "Try Demo",
+  "已启用离线示例源（仅演示）": "Offline demo source enabled (preview only)",
+  "仅演示": "Demo",
+  "离线示例源 · 仅演示界面": "Offline Demo · Preview Mode",
+  "移除示例源": "Remove Demo",
+  "已移除示例源": "Demo source removed",
+  "播放不可用": "Playback unavailable",
+  "离线示例源 · 暂不提供播放": "Offline Demo · Playback Disabled",
+  "当前视频源未开启播放": "Playback is disabled for this source",
+  "可体验首页、搜索、标签、详情、选集与能力裁剪，导入真实视频源后即可播放": "Explore home, search, tags, details, episodes & capability gating; import a real source to play videos.",
+  "查看详情与选集": "Details & Episodes",
+  "查看详情": "View Details",
 };
 
 export default en;

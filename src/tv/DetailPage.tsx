@@ -7,6 +7,7 @@ import { useTv } from "./TvProvider";
 import { useRemoteScope } from "./remote";
 import { TvModal } from "./ui";
 import { detailContent, failureMessage, postParts, videoParts, type TvPart } from "./player/content";
+import { hasPlaybackCapability, isDemoOfflineSource } from "../shared/lib/demoSource";
 import "./player/player.css";
 
 type Props = {
@@ -29,10 +30,12 @@ export default function DetailPage({ content, sourceKey, progress, favorite, onF
   const [error, setError] = useState("");
   const allowPosts = !activeSource || activeSource.capabilities.posts;
   const allowEpisodes = !activeSource || activeSource.capabilities.detail.episodes;
+  const allowPlayback = !activeSource || hasPlaybackCapability(activeSource.capabilities);
   const [retry, setRetry] = useState(0);
   const [more, setMore] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [favoritePending, setFavoritePending] = useState(false);
+  const [demoNotice, setDemoNotice] = useState("");
   const transportEpoch = useRef(0);
   const key = `${content.kind}:${content.id}`;
   const sourceReady = !!sourceKey.split("@")[0];
@@ -82,7 +85,7 @@ export default function DetailPage({ content, sourceKey, progress, favorite, onF
     return () => { alive = false; };
   }, [request, allowPosts]);
 
-  useEffect(() => { setMore(false); setSelectedTags([]); }, [key, sourceKey, preferences.revision]);
+  useEffect(() => { setMore(false); setSelectedTags([]); setDemoNotice(""); }, [key, sourceKey, preferences.revision]);
   useRemoteScope({ id: `detail:${key}`, priority: 20, onKey: remote => {
     if (remote === "back") { onBack(); return true; }
     return false;
@@ -118,11 +121,18 @@ export default function DetailPage({ content, sourceKey, progress, favorite, onF
           {item.description && <p className="tv-detail-description">{item.description}</p>}
           <div className="tv-detail-tags" aria-label="标签">{displayed?.content.tags.map(tag => <span key={tag}>{tag}</span>)}</div>
           <div className="tv-detail-actions" data-tv-region="detail-actions">
-            <button data-tv-focus={`detail:${key}:play`} className="tv-primary" disabled={!firstPart} onClick={() => firstPart && onPlay(item, firstPart, resumeSeconds)}>{resumeSeconds > 0 || nextPart ? "继续观看" : resumable && progress!.seconds > 0 ? "重新播放" : "播放"}</button>
+            <button data-tv-focus={`detail:${key}:play`} className="tv-primary" disabled={!firstPart || !allowPlayback} onClick={() => firstPart && allowPlayback && onPlay(item, firstPart, resumeSeconds)}>{!allowPlayback ? "仅演示（不可播放）" : resumeSeconds > 0 || nextPart ? "继续观看" : resumable && progress!.seconds > 0 ? "重新播放" : "播放"}</button>
             <button data-tv-focus={`detail:${key}:favorite`} aria-pressed={favorite} disabled={!displayed || favoritePending} onClick={() => void toggleFavorite()}>{favorite ? "取消收藏" : "收藏"}</button>
             {(content.kind === "post" || allowEpisodes) && <button data-tv-focus={`detail:${key}:episodes`} disabled={!parts.length} onClick={() => document.querySelector<HTMLButtonElement>(".tv-detail-episodes [data-tv-focus]")?.focus()}>{content.kind === "post" ? "选择分段" : "选集"}</button>}
             <button data-tv-focus={`detail:${key}:more`} disabled={!displayed || !item.tags.length} onClick={() => { setSelectedTags([]); setMore(true); }}>更多</button>
           </div>
+          {!allowPlayback && displayed && (
+            <p className="tv-detail-demo-note" role="status">
+              {demoNotice || (isDemoOfflineSource(activeSource)
+                ? "当前为离线示例源，播放入口已置灰；可浏览详情与选集，导入真实视频源后即可播放。"
+                : "当前视频源未开启播放能力，播放入口已置灰。")}
+            </p>
+          )}
         </div>
       </div>
       {error ? <div className="tv-detail-message" role="alert"><p>{error}</p><div data-tv-region="detail-retry"><button data-tv-focus={`detail:${key}:retry`} onClick={() => setRetry(value => value + 1)}>重试</button></div></div> : !displayed ? <p role="status">正在加载详情…</p> : null}
@@ -131,7 +141,7 @@ export default function DetailPage({ content, sourceKey, progress, favorite, onF
           const partResume = progress?.key === key && progress.part === part.id
             && !(part.duration && part.duration > 0 && progress.seconds >= Math.max(1, part.duration - 3))
             ? progress.seconds : 0;
-          return <button key={part.id} data-tv-focus={`detail:${key}:part:${part.id}`} title={part.label} onClick={() => onPlay(item, part.id, partResume)}><span>{part.label}</span>{resumable && progress!.part === part.id ? <small>上次观看</small> : null}</button>;
+          return <button key={part.id} data-tv-focus={`detail:${key}:part:${part.id}`} title={part.label} aria-disabled={!allowPlayback || undefined} className={!allowPlayback ? "tv-episode-disabled" : undefined} onClick={() => { if (!allowPlayback) { setDemoNotice("当前为离线示例源，仅演示详情与选集，不提供播放；请导入真实视频源。"); return; } onPlay(item, part.id, partResume); }}><span>{part.label}</span>{resumable && progress!.part === part.id ? <small>上次观看</small> : null}</button>;
         })}
       </div></div>}
     </>}

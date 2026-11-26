@@ -12,6 +12,7 @@ import TvLanPushPanel from "./TvLanPushPanel";
 import { useTv } from "./TvProvider";
 import { Logo } from "../shared/ui/icons";
 import { TvModal } from "./ui";
+import { buildDemoOfflinePackageJson, isDemoOfflineSource } from "../shared/lib/demoSource";
 import {
   cancelTvUpdateDownload,
   checkTvUpdate,
@@ -135,10 +136,13 @@ export default function SettingsPage(){
         <p>当前：{sources?.activeSourceId?(sources.sources.find(s=>s.id===sources.activeSourceId)?.name||sources.activeSourceId):"未设置"}</p>
         <div className="tv-options" data-tv-region="source-actions">
           <button data-tv-focus="src-go-sync" onClick={()=>{setMessage("");setGroup("手机同步");}}>手机扫码导入</button>
+          {!(sources?.sources||[]).some(s=>isDemoOfflineSource(s))&&(
+            <button data-tv-focus="src-try-demo" disabled={busy} onClick={()=>void run(async()=>{await api.sourceImport(buildDemoOfflinePackageJson(),true);setSources(await api.sourceState());window.dispatchEvent(new Event("hg:line-changed"));window.dispatchEvent(new Event("hg:source-changed"));},"已启用离线示例源（仅演示）")}>试用离线示例源</button>
+          )}
         </div>
         <div data-tv-region="source-list" data-tv-columns="1" style={{marginTop:10}}>
           {(sources?.sources||[]).map(src=><div key={src.id} className="tv-setting-row" style={{flexWrap:"wrap",gap:8,marginTop:8}}>
-            <span>{src.name} v{src.version}{src.active?" · 使用中":""}</span>
+            <span>{src.name} v{src.version}{isDemoOfflineSource(src)?" · 仅演示":""}{src.active?" · 使用中":""}</span>
             {src.active
               ?<button data-tv-focus={`src-off-${src.id}`} disabled={busy} onClick={()=>void run(async()=>{setSources(await api.sourceActivate(null));window.dispatchEvent(new Event("hg:line-changed"));},"已停用")}>停用</button>
               :<button data-tv-focus={`src-act-${src.id}`} disabled={busy} onClick={()=>void run(async()=>{setSources(await api.sourceActivate(src.id));window.dispatchEvent(new Event("hg:line-changed"));},`已启用 ${src.name}`)}>启用</button>}

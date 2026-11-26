@@ -15,6 +15,7 @@ import {
   IBack, IBoltF, IClose, ICompress, IList, IPauseF, IPlayF, ISearch,
 } from "../../shared/ui/icons";
 import { tr } from "../../shared/i18n";
+import { hasPlaybackCapability } from "../../shared/lib/demoSource";
 
 const VideoDetailsPanel = lazy(() => import("./VideoDetailsPanel"));
 const EpisodesPanel = lazy(() => import("./Panels").then(m => ({ default: m.EpisodesPanel })));
@@ -104,6 +105,7 @@ export function FeedPlayerShellChrome({
   onFollow, openTag, openTagMenu, closePanels, pushPage, toast,
 }: Omit<Props, "clean">) {
   const { capabilities } = useStore();
+  const playbackDisabled = kind === "video" && !hasPlaybackCapability(capabilities);
   const liveMeta = { ...meta, like: likeCount, collect: collectCount };
   const landscapeStage = rotated || vpLandscape;
   const edgePad = landscapeStage ? 24 : 16;
@@ -132,7 +134,7 @@ export function FeedPlayerShellChrome({
   return (
     <>
       {/* 桌面控制条 */}
-      {isDesktop && (
+      {isDesktop && !playbackDisabled && (
         <PlayerControls
           paused={paused} duration={duration} rate={rate}
           clock={playbackClock}

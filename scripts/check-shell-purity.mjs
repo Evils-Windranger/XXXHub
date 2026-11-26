@@ -2,6 +2,7 @@
 // Pure-shell boundary guard: verifies no site-specific domain, decrypt key,
 // site SSR selector, hardcoded external source, or site edge protocol leaks into the shell.
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -14,6 +15,7 @@ const SCAN_DIRS = [
   "tests",
   "scripts",
   "examples",
+  "docs",
   ".github",
 ];
 
@@ -39,7 +41,7 @@ const SCAN_FILES = [
 ];
 
 const SKIP_DIRS = new Set(["target", "gen", "node_modules", "dist", ".git"]);
-const SKIP_FILES = new Set(["scripts/check-shell-purity.mjs"]);
+const SKIP_FILES = new Set();
 
 const EXTENSIONS = new Set([
   ".rs",
@@ -65,38 +67,109 @@ const EXTENSIONS = new Set([
   ".svg",
 ]);
 
-const FORBIDDEN = [
-  { label: "site domain", re: /huangguo/i },
-  { label: "site CDN/mirror domain", re: /drleao\.cn|hzjvlo\.cn|xxbgwypx\.cc/i },
-  { label: "site publish/worker domain", re: /pages\.dev|workers\.dev/i },
-  { label: "hardcoded external source", re: /hghg-src|\bhghg\b|\bhg\.json\b/i },
-  { label: "hardcoded CDN registry", re: /jsdelivr\.net|unpkg\.com/i },
-  { label: "hardcoded cover key", re: /f5d965df75336270/i },
-  { label: "hardcoded cover iv", re: /97b60394abc2fbe1/i },
-  {
-    label: "unicode-escaped site brand",
-    re: /\\(?:u\{0*9ec4\}|u9ec4|U0*9ec4)\\(?:u\{0*679c\}|u679c|U0*679c)/i,
-  },
-  { label: "site brand/taxonomy copy", re: /黄果|吃瓜|AI成人短剧|AI成人漫剧/ },
-  { label: "site channel slug", re: /ai-duanju|ai-manju|remen-chigua/i },
-  { label: "site edge protocol", re: /dx150-edge-v1|\bdx150\b/i },
-  {
-    label: "site edge endpoint or header",
-    re: /\/api\/(?:edge|public|dynamic|playback|user)\/request|X-HG-Public-JSON/i,
-  },
-  {
-    label: "site SSR selector",
-    re: /hg-home-popular-tags|hg-search-hot|hg-channel-page|hg-list-page|hg-card-grid|hg-drama-card|hg-page-header__extra|hg-tagrow__item/i,
-  },
-  {
-    label: "site publish script or route",
-    re: /\bpublish\.js\b|\/blog\/gossip|\/ranks\/hot/i,
-  },
-  {
-    label: "site fixture/helper residue",
-    re: /via=hgdj|healthy_proxy_response/i,
-  },
+const GENERIC_FORBIDDEN = [
+  { label: "site publish/worker domain", re: new RegExp(["pages", "dev"].join("\\.") + "|" + ["workers", "dev"].join("\\."), "i") },
+  { label: "hardcoded CDN registry", re: new RegExp(["jsdelivr", "net"].join("\\.") + "|" + ["unpkg", "com"].join("\\."), "i") },
+  { label: "site publish script", re: new RegExp("\\b" + ["publish", "js"].join("\\.") + "\\b", "i") },
 ];
+
+// Irreversible 64-bit SHA-256 prefixes of site-specific tokens (no plaintext site strings stored).
+const FORBIDDEN_HASHES = new Map([
+  ["b509a70b8cffac27", "site domain"],
+  ["0367058107bd5d78", "site CDN/mirror domain"],
+  ["59e6ac9b6766a309", "site CDN/mirror domain"],
+  ["91e4459c6d52e244", "site CDN/mirror domain"],
+  ["ddb0753aa5ab6f63", "site CDN/mirror domain"],
+  ["a4cda4489e734775", "site CDN/mirror domain"],
+  ["8fcfeb59aa570769", "site CDN/mirror domain"],
+  ["f8810323ecebea2f", "hardcoded external source"],
+  ["b9c7724ed4e10903", "hardcoded external source"],
+  ["c5aaeb1a6142c6a9", "hardcoded external source"],
+  ["f37678ac9341c2d2", "hardcoded cover key"],
+  ["c9c68ae1b856402e", "hardcoded cover iv"],
+  ["70ad17284678e0ad", "site brand/taxonomy copy"],
+  ["15b61d749a292902", "site brand/taxonomy copy"],
+  ["ff732aadf3de0de0", "site brand/taxonomy copy"],
+  ["430baed37133d247", "site brand/taxonomy copy"],
+  ["8831f93e8d1b238e", "site channel slug"],
+  ["f7ee3f77baebf0fc", "site channel slug"],
+  ["42119ea8854cd18f", "site channel slug"],
+  ["ed1c4ca08981e6d7", "site edge protocol"],
+  ["39b338ca79e7745f", "site edge protocol"],
+  ["124c2a964f6533a2", "site edge endpoint or header"],
+  ["63872ae42ebe3b11", "site edge endpoint or header"],
+  ["5c5d369e4d5b4a5e", "site edge endpoint or header"],
+  ["ef1925a8bebe514a", "site edge endpoint or header"],
+  ["be2558efe40a2bfd", "site edge endpoint or header"],
+  ["9c18dbfab46fac5f", "site edge endpoint or header"],
+  ["c60795d6a4c51938", "site SSR selector"],
+  ["77f914aff2ea48d1", "site SSR selector"],
+  ["5323d53f4e2d6139", "site SSR selector"],
+  ["014ee6da28fa737c", "site SSR selector"],
+  ["043dc1b32b18b00a", "site SSR selector"],
+  ["4139c56654c9c411", "site SSR selector"],
+  ["216e95d0cd2a878c", "site SSR selector"],
+  ["a8da8be720f068eb", "site SSR selector"],
+  ["453a60362c81091a", "site publish script or route"],
+  ["5f5f41c5e28de2ae", "site publish script or route"],
+  ["c02bc3d03a74a537", "site fixture/helper residue"],
+  ["9dad698a7a72f424", "site fixture/helper residue"],
+]);
+
+const HASH_CACHE = new Map();
+function lookupHash(token) {
+  let cached = HASH_CACHE.get(token);
+  if (cached === undefined) {
+    const h = crypto.createHash("sha256").update(token).digest("hex").slice(0, 16);
+    cached = FORBIDDEN_HASHES.get(h) || "";
+    HASH_CACHE.set(token, cached);
+  }
+  return cached;
+}
+
+function findForbiddenLabels(text) {
+  const hits = new Set();
+  for (const rule of GENERIC_FORBIDDEN) {
+    if (rule.re.test(text)) hits.add(rule.label);
+  }
+  const lower = text.toLowerCase();
+  for (const m of lower.matchAll(/\/[a-z0-9_-]+(?:\/[a-z0-9_-]+)+/g)) {
+    const label = lookupHash(m[0]);
+    if (label) hits.add(label);
+  }
+  for (const m of lower.matchAll(/[a-z0-9]+(?:[._=-][a-z0-9]+)*/g)) {
+    const tok = m[0];
+    const direct = lookupHash(tok);
+    if (direct) hits.add(direct);
+    if (tok.includes(".") || tok.includes("_") || tok.includes("=") || tok.includes("-")) {
+      for (const part of tok.split(/[._=-]+/)) {
+        if (part.length >= 4) {
+          const p = lookupHash(part);
+          if (p) hits.add(p);
+        }
+      }
+    }
+    if (tok.length >= 8 && !tok.includes(".") && !tok.includes("-") && !tok.includes("_") && !tok.includes("=")) {
+      for (let i = 0; i <= tok.length - 8; i += 1) {
+        const sub = tok.slice(i, i + 8);
+        const sLabel = lookupHash(sub);
+        if (sLabel) hits.add(sLabel);
+      }
+    }
+  }
+  for (const m of lower.matchAll(/[a-z0-9]*[\u4e00-\u9fff][a-z0-9\u4e00-\u9fff]*/g)) {
+    const run = m[0];
+    for (const win of [2, 6]) {
+      if (run.length < win) continue;
+      for (let i = 0; i <= run.length - win; i += 1) {
+        const sub = run.slice(i, i + win);
+        const label = lookupHash(sub);
+        if (label) hits.add(label);
+      }
+    }
+  }
+  return [...hits];
+}
 
 const violations = [];
 let scannedFiles = 0;
@@ -720,11 +793,13 @@ function scanFile(filePath) {
 
   rawLines.forEach((line, idx) => {
     const decLine = decodedLines[idx] ?? "";
-    for (const rule of FORBIDDEN) {
-      if (rule.re.test(line) || (decLine !== line && rule.re.test(decLine))) {
-        matchedOnLine.add(rule.label);
-        violations.push(`${rel}:${idx + 1}: [${rule.label}] ${line.trim()}`);
-      }
+    const labels = new Set(findForbiddenLabels(line));
+    if (decLine !== line) {
+      for (const l of findForbiddenLabels(decLine)) labels.add(l);
+    }
+    for (const label of labels) {
+      matchedOnLine.add(label);
+      violations.push(`${rel}:${idx + 1}: [${label}] ${line.trim()}`);
     }
   });
 
@@ -750,9 +825,13 @@ function scanFile(filePath) {
     candidates.push(text.replace(/\s+/g, " "), text.replace(/\r?\n/g, ""));
   }
 
-  for (const rule of FORBIDDEN) {
-    if (!matchedOnLine.has(rule.label) && candidates.some((c) => rule.re.test(c))) {
-      violations.push(`${rel}:multiline: [${rule.label}] matched across lines, escapes, or concatenated literals`);
+  const candidateHits = new Set();
+  for (const c of candidates) {
+    for (const label of findForbiddenLabels(c)) candidateHits.add(label);
+  }
+  for (const label of candidateHits) {
+    if (!matchedOnLine.has(label)) {
+      violations.push(`${rel}:multiline: [${label}] matched across lines, escapes, or concatenated literals`);
     }
   }
 }

@@ -166,8 +166,8 @@ export default function Feed({
     toast(tr("已锁定屏幕"), "info", "playback-hint");
   };
   const togglePlayback = useCallback(() => {
-    videoRef.current?.toggle();
-  }, []);
+    if (capabilities.playback.hls || capabilities.playback.mp4) videoRef.current?.toggle();
+  }, [capabilities.playback.hls, capabilities.playback.mp4]);
 
   const toggleSwipeEp = () => {
     const next = !swipeEp;
@@ -423,7 +423,7 @@ export default function Feed({
 
   /* 拉播放地址 */
   useEffect(() => {
-    if (!active || !curId || !allowed) return;
+    if (!active || !curId || !allowed || (!capabilities.playback.hls && !capabilities.playback.mp4)) return;
     if (playUrls[playKey]) return;
     let alive = true;
     requestPlay(curId, curEp)
@@ -514,7 +514,7 @@ export default function Feed({
 
   /* 切换条目/集数时重置播放状态 */
   useEffect(() => {
-    setDuration(0); setErr(""); setWaiting(true); setPaused(false);
+    setDuration(0); setErr(""); setWaiting(capabilities.playback.hls || capabilities.playback.mp4); setPaused(false);
     setPlayingKey("");
     playbackClock.publish(0);
     setPortraitFit("contain");
