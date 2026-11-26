@@ -682,12 +682,6 @@ html.theme-transitioning .ios-account-card { backdrop-filter:none; -webkit-backd
   .plat-ios .ios-tab-active .ios-page>.scroll-y {
     padding-bottom:calc(64px + max(6px,var(--native-sab,env(safe-area-inset-bottom,0px))));
   }
-  .mobile-video-action-rail {
-    gap:4px!important;
-    --mobile-action-rail-clearance:56px;
-  }
-  .mobile-video-action-rail>.ios-button { min-block-size:36px!important; min-inline-size:36px!important; }
-  .mobile-video-action-rail svg { width:22px; height:22px; }
 }
 
 /* Keep accessibility fallbacks last so the glass layer cannot override them. */

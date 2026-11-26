@@ -7,6 +7,7 @@ import { isMobile, selfTest } from "../shared/api/api";
 import { addPluginListener, invoke } from "@tauri-apps/api/core";
 import { runBack } from "../shared/lib/back";
 import { exitDocumentFullscreen, getFullscreenElement } from "../shared/lib/fullscreen";
+import { initMobileHaptics, triggerHaptic } from "../shared/lib/haptics";
 import Home from "../features/feed/Home";
 import LoginModal from "../features/account/LoginModal";
 import { ToastHost } from "../shared/ui/ui";
@@ -101,7 +102,7 @@ function TabBar() {
     const slot = Math.round(pos);
     if (slot !== drag.lastSlot) {
       drag.lastSlot = slot;
-      navigator.vibrate?.(6);
+      triggerHaptic("tick");
     }
   };
 
@@ -321,13 +322,18 @@ function AppBody() {
   const { platform, tab, setTab, stack, pop, loginOpen, setLoginOpen, fs, setFs, clean, locked } = useStore();
   const mainRef = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(false);
+  const [shortLandscape, setShortLandscape] = useState(false);
 
   useLayoutEffect(() => {
     const el = mainRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setWide(el.clientWidth > 640));
+    const sync = () => {
+      setWide(el.clientWidth > 640);
+      setShortLandscape(el.clientWidth > el.clientHeight && el.clientHeight <= 500);
+    };
+    const ro = new ResizeObserver(sync);
     ro.observe(el);
-    setWide(el.clientWidth > 640);
+    sync();
     return () => ro.disconnect();
   }, []);
 
@@ -352,7 +358,7 @@ function AppBody() {
   }, [stack.length, pop, setTab, loginOpen, setLoginOpen, fs, setFs]);
 
   const pageActive = stack.length === 0 && !loginOpen;
-  const bottomInset = fs || clean || locked ? 0 : 78;
+  const bottomInset = fs || clean || locked ? 0 : (shortLandscape ? 56 : 78);
   /* 栈页（从搜索/分类/我的进入的播放页、图文页）没有底栏，
      底部只让出安全区。之前多留了 20px，视频底边会露出一条
      「底栏」似的窄缝（底部的压暗渐变到不了屏幕最底）。 */
@@ -562,6 +568,8 @@ export default function App() {
     document.addEventListener("contextmenu", prevent);
     return () => document.removeEventListener("contextmenu", prevent);
   }, []);
+
+  useEffect(() => initMobileHaptics(), []);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;

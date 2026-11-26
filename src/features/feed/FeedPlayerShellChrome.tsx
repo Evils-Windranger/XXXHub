@@ -12,7 +12,7 @@ import { PlaybackSettingsPanel } from "./PlaybackSettingsPanel";
 import { PanelSwipeArea } from "./PanelSwipeArea";
 import { HOLD_SPEED_STEPS } from "./mobileHold";
 import {
-  IBoltF, IClose, ICompress, IPauseF, IPlayF, ISearch,
+  IBack, IBoltF, IClose, ICompress, IList, IPauseF, IPlayF, ISearch,
 } from "../../shared/ui/icons";
 import { tr } from "../../shared/i18n";
 
@@ -108,6 +108,16 @@ export function FeedPlayerShellChrome({
   const edgePad = landscapeStage ? 24 : 16;
   const fsSafeLeft = rotated ? `calc(var(--sat, 0px) + ${edgePad}px)` : `calc(var(--sal, 0px) + ${edgePad}px)`;
   const fsSafeRight = rotated ? `calc(var(--sab, 0px) + ${edgePad}px)` : `calc(var(--sar, 0px) + ${edgePad}px)`;
+  const fsBottomBase = rotated
+    ? "12px"
+    : vpLandscape
+      ? "max(10px, var(--native-sab, env(safe-area-inset-bottom, 0px)))"
+      : "calc(var(--sab, 0px) + 12px)";
+  const fsTopBase = rotated
+    ? "10px"
+    : vpLandscape
+      ? "max(8px, var(--native-sat, env(safe-area-inset-top, 0px)))"
+      : "calc(var(--sat, 0px) + 6px)";
   const activePct = barPct ?? (scrub ? scrub.pct / 100 : null);
   const scrubbing = activePct !== null;
   const detailBody = (onClose?: () => void) => (
@@ -187,12 +197,35 @@ export function FeedPlayerShellChrome({
         );
       })()}
 
-      {/* 移动端全屏进度条（横竖屏统一在底部突出显示，闲置隐藏时横拖画面自动唤起底部条） */}
+      {/* 移动端全屏顶部/底部柔光渐变底衬（无 backdrop-filter，保证亮画面控件清晰且不闪烁） */}
+      {!isDesktop && fs && !idle && (
+        <>
+          <div className="mobile-fs-top-scrim" aria-hidden="true" />
+          <div className="mobile-fs-header"
+            style={{
+              top: fsTopBase,
+              paddingLeft: fsSafeLeft,
+              paddingRight: rotated ? "calc(var(--sab, 0px) + 72px)" : "calc(var(--sar, 0px) + 72px)",
+            }}>
+            <Button onClick={exitFs} aria-label={tr("返回")}
+              className="mobile-fs-btn hg-chip shrink-0 w-9 h-9 rounded-full flex items-center justify-center pressable">
+              <IBack size={19} />
+            </Button>
+            <span className="mobile-fs-title">{meta.title}</span>
+            {kind === "video" && episodes.length > 0 && (
+              <span className="mobile-fs-ep-pill">{tr("第 {0}/{1} 集", curEp, episodes.length)}</span>
+            )}
+          </div>
+          <div className="mobile-fs-bottom-scrim" aria-hidden="true" />
+        </>
+      )}
+
+      {/* 移动端全屏进度条（位于控制行上方，无重叠，闲置横拖画面可自动唤起） */}
       {!isDesktop && fs && (!idle || scrubbing) && (
         <div
-          className="absolute inset-x-0 z-30 px-4"
+          className="absolute inset-x-0 z-30"
           style={{
-            bottom: rotated ? (idle ? 16 : 46) : `calc(var(--sab, 0px) + ${idle ? 16 : 46}px)`,
+            bottom: idle ? fsBottomBase : `calc(${fsBottomBase} + 50px)`,
             paddingLeft: fsSafeLeft,
             paddingRight: fsSafeRight,
             height: 36,
@@ -236,31 +269,39 @@ export function FeedPlayerShellChrome({
       {/* 移动端：沉浸全屏（安卓 WebView 不支持 Fullscreen API，改用应用内沉浸层） */}
       {!isDesktop && fs && !idle && (
         <>
-          <div className="mobile-fs-controls absolute inset-x-0 z-40 flex items-center px-4"
+          <div className="mobile-fs-controls absolute inset-x-0 z-40 flex items-center"
             style={{
-              bottom: rotated ? 10 : "calc(var(--sab, 0px) + 10px)",
+              bottom: fsBottomBase,
               paddingLeft: fsSafeLeft,
               paddingRight: fsSafeRight,
             }}>
             <Button onClick={() => videoRef.current?.toggle()} aria-label={paused ? tr("播放") : tr("暂停")}
-              className="hg-chip shrink-0 w-9 h-9 rounded-full flex items-center justify-center pressable">
+              className="mobile-fs-btn hg-chip shrink-0 w-9 h-9 rounded-full flex items-center justify-center pressable">
               {paused ? <IPlayF size={18} /> : <IPauseF size={17} />}
             </Button>
             <PlaybackTime clock={playbackClock} duration={duration} padMinutes className="mobile-fs-time shrink-0 text-[12px] font-semibold hg-ink-2 tabular-nums" />
-            <Button
-              aria-label={tr("切换倍速，当前 {0} 倍", effRate)}
-              onClick={() => {
-                const seq = [1, 1.25, 1.5, 2];
-                const i = seq.indexOf(rate);
-                setRate(seq[(i + 1) % seq.length]);
-              }}
-              className={`ml-auto shrink-0 flex items-center gap-1 px-2.5 h-8 rounded-full text-[13px] font-bold pressable ${effRate !== 1 ? "bg-white text-[#191919]" : "hg-chip hg-ink-2"}`}>
-              <IBoltF size={12} />{effRate}x
-            </Button>
-            <Button onClick={exitFs} aria-label={tr("退出全屏")}
-              className="mobile-fs-exit hg-chip shrink-0 w-8 h-8 rounded-full flex items-center justify-center pressable">
-              <ICompress size={16} />
-            </Button>
+            <div className="ml-auto flex items-center gap-2 shrink-0">
+              {kind === "video" && episodes.length > 1 && (
+                <Button onClick={() => setPanel("episodes")} aria-label={tr("选集")}
+                  className="mobile-fs-pill hg-chip shrink-0 flex items-center gap-1 px-3 h-9 rounded-full text-[12.5px] font-semibold hg-ink-2 pressable">
+                  <IList size={15} /><span>{tr("选集")}</span>
+                </Button>
+              )}
+              <Button
+                aria-label={tr("切换倍速，当前 {0} 倍", effRate)}
+                onClick={() => {
+                  const seq = [1, 1.25, 1.5, 2];
+                  const i = seq.indexOf(rate);
+                  setRate(seq[(i + 1) % seq.length]);
+                }}
+                className={`mobile-fs-pill shrink-0 flex items-center gap-1 px-3 h-9 rounded-full text-[13px] font-bold pressable ${effRate !== 1 ? "bg-white text-[#191919]" : "hg-chip hg-ink-2"}`}>
+                <IBoltF size={12} />{effRate}x
+              </Button>
+              <Button onClick={exitFs} aria-label={tr("退出全屏")}
+                className="mobile-fs-exit mobile-fs-btn hg-chip shrink-0 w-9 h-9 rounded-full flex items-center justify-center pressable">
+                <ICompress size={17} />
+              </Button>
+            </div>
           </div>
         </>
       )}

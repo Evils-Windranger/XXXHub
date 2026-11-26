@@ -8,6 +8,7 @@ import {
 } from "./mobileHold";
 import { resolveFullscreenEpisodeSwipe } from "./fullscreenEpisodeSwipe";
 import type { FeedPanel, PinchState } from "./useFeedViewport";
+import { triggerHaptic } from "../../shared/lib/haptics";
 import { tr } from "../../shared/i18n";
 
 type Args = {
@@ -132,7 +133,7 @@ export function useFeedTouchGestures({
         cur.speed = createHoldSpeed(cur.x, startRate);
         setHoldSlow(false);
         setHoldSpeed(cur.speed.rate);
-        try { navigator.vibrate?.(25); } catch { /* ignore */ }
+        triggerHaptic("medium");
       }, HOLD_DELAY_MS) as unknown as number,
     };
     gesture.current = g;
@@ -243,7 +244,7 @@ export function useFeedTouchGestures({
             const want = result.target;
             setEpMap((m) => ({ ...m, [curId]: want }));
             episodeToast(tr("第 {0}集{1}", want, total ? ` / ${total}` : ""));
-            try { navigator.vibrate?.(12); } catch { /* ignore */ }
+            triggerHaptic("tick");
             return;
           }
         }
@@ -252,7 +253,7 @@ export function useFeedTouchGestures({
         if (swipeEp && kind === "video" && want) {
           setEpMap((m) => ({ ...m, [curId]: want }));
           episodeToast(tr("第 {0}集{1}", want, total ? ` / ${total}` : ""));
-          try { navigator.vibrate?.(12); } catch { /* ignore */ }
+          triggerHaptic("tick");
           return;
         }
         if (swipeEp) { go(dir); return; }

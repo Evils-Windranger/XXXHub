@@ -54,6 +54,7 @@
 | `hghubx_swipe_ep_v2` | `hghub_swipe_ep_v2` | 上下划切集的一次性迁移标记 |
 | `hghubx_theme` | `hghub_theme` | `light`/`dark`/`system` |
 | `hghubx_locale` | — | 界面语言偏好（`zh-CN`/`zh-TW`/`en`，默认 `zh-CN`） |
+| `hghubx_haptic_v1` | — | 移动端按键与手势震动反馈强度（`off`/`light`/`medium`/`strong`，默认 `medium`） |
 | `hghubx_auto_line` | `hg.autoLine` | 自动选线开关 |
 | `hghubx_usage_agreement` | — | 使用协议版本与签署时间 |
 | `hghubx_mobile_hold_guide_v1` | — | 移动端首次长按倍速教程已读标记 |

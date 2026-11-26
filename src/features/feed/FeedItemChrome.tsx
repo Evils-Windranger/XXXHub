@@ -123,7 +123,8 @@ export default function FeedItemChrome({
             <small>{index + 1} / {effectiveLength}</small>
           </div>
         ) : (
-          <div className="absolute inset-x-0 z-20 flex items-center gap-2 px-2.5 pointer-events-none" style={{ top: "calc(var(--sat, 0px) + 8px)", paddingRight: 164 }}>
+          <div className="absolute inset-x-0 z-20 flex items-center gap-2 pointer-events-none"
+            style={{ top: "calc(var(--sat, 0px) + 8px)", paddingLeft: "calc(var(--sal, 0px) + 10px)", paddingRight: "calc(var(--sar, 0px) + 164px)" }}>
             <Button onClick={onBack} aria-label={tr("返回")} className="hg-chip w-9 h-9 rounded-full flex items-center justify-center pressable elev-1 pointer-events-auto"><IBack size={20} /></Button>
             <span className="text-[15px] font-semibold hg-ink hg-ov-shadow truncate">{title}</span>
           </div>
@@ -131,7 +132,7 @@ export default function FeedItemChrome({
       ) : null}
       {!fs && !clean && !isDesktop && mode === "context" && (
         <span className="feed-position-pill absolute z-20 px-2.5 py-1 rounded-full hg-chip text-[12px] font-semibold tabular-nums"
-          style={{ top: "calc(var(--sat, 0px) + 52px)", left: 12, color: "rgba(255,255,255,.94)" }}>
+          style={{ top: "calc(var(--sat, 0px) + 52px)", left: "calc(var(--sal, 0px) + 12px)", color: "rgba(255,255,255,.94)" }}>
           {index + 1} / {effectiveLength}
         </span>
       )}
@@ -163,7 +164,7 @@ export default function FeedItemChrome({
       {/* Mobile social actions and the playback settings entry. */}
       {!fs && !clean && !isDesktop && (
         <div className="mobile-video-action-rail absolute z-30 flex flex-col items-center gap-[10px]"
-          style={{ right: "calc(var(--sar, 0px) + 12px)", bottom: `calc(var(--sab, 0px) + ${bottomInset}px + var(--mobile-action-rail-clearance, 108px))` }}>
+          style={{ right: "calc(var(--sar, 0px) + 12px)", bottom: `calc(var(--mobile-feed-sab, var(--sab, 0px)) + ${bottomInset}px + var(--mobile-action-rail-clearance, 108px))` }}>
           <Button onClick={() => void onLike()} disabled={likePending} aria-busy={likePending} className="mobile-action-like flex flex-col items-center gap-1 pressable" aria-pressed={liked} aria-label={tr("点赞")}>
             {liked ? <IHeartF size={27} className="text-neon" /> : <IHeart size={27} className="hg-ink hg-ov-shadow" />}
             <span className="text-[12px] text-white/90 tabular-nums">{fmt(likeCount)}</span>
@@ -255,7 +256,8 @@ export default function FeedItemChrome({
 
       {/* 移动端：标题 + 详情标签 + 底部进度条（横拖画面或直拖底栏时统一突出显示下方进度条，不在屏幕中央叠进度条） */}
       {!fs && !isDesktop && (!clean || scrubbing) && (
-        <div className="absolute inset-x-0 z-20 pointer-events-none" style={{ bottom: `calc(var(--sab, 0px) + ${bottomInset}px)` }}>
+        <div className="mobile-feed-bottom-chrome absolute inset-x-0 z-20 pointer-events-none"
+          style={{ bottom: `calc(var(--mobile-feed-sab, var(--sab, 0px)) + ${bottomInset}px)` }}>
           {!clean && (
             <div className={`mobile-video-meta-copy relative pb-1 flex items-center gap-2 transition-opacity duration-150 ${scrubbing ? "opacity-35" : ""}`}>
               <div className="flex-1 min-w-0">

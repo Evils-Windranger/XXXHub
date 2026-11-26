@@ -148,9 +148,15 @@ if (existsSync(manifestPath)) {
       `    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    $1`,
     );
   }
+  if (!/android\.permission\.VIBRATE/.test(updatedManifest)) {
+    updatedManifest = updatedManifest.replace(
+      /(<application\b)/,
+      `    <uses-permission android:name="android.permission.VIBRATE" />\n    $1`,
+    );
+  }
   if (updatedManifest !== manifestRaw) {
     writeFileSync(manifestPath, updatedManifest);
-    console.log("[splash] Android 已注册 hghubx://import 深链与相机权限");
+    console.log("[splash] Android 已注册 hghubx://import 深链、相机与震动权限");
   }
 }
 
@@ -171,13 +177,18 @@ class MainActivity : TauriActivity() {
 }`;
   const patchedActivity = `package com.hghubx.app
 
+import android.content.Context
 import android.content.Intent
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
@@ -190,6 +201,30 @@ class MainActivity : TauriActivity() {
   private var imeBottom = 0
   private var webViewHooked = false
   @Volatile private var pendingDeepLink: String? = null
+
+  private class HapticBridge(private val context: Context) {
+    @Suppress("DEPRECATION")
+    @JavascriptInterface
+    fun vibrate(durationMs: Int, amplitude: Int) {
+      try {
+        val ms = durationMs.coerceIn(1, 80).toLong()
+        val amp = amplitude.coerceIn(1, 255)
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+          val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+          vm?.defaultVibrator
+        } else {
+          context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        } ?: return
+        if (!vibrator.hasVibrator()) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          val effAmp = if (vibrator.hasAmplitudeControl()) amp else VibrationEffect.DEFAULT_AMPLITUDE
+          vibrator.vibrate(VibrationEffect.createOneShot(ms, effAmp))
+        } else {
+          vibrator.vibrate(ms)
+        }
+      } catch (_: Throwable) {}
+    }
+  }
 
   private fun findWebView(view: View?): WebView? {
     if (view is WebView) return view
@@ -251,6 +286,9 @@ class MainActivity : TauriActivity() {
     deliverDeepLink(content)
     if (!webViewHooked) {
       webViewHooked = true
+      try {
+        wv.addJavascriptInterface(HapticBridge(applicationContext), "__HG_HAPTIC__")
+      } catch (_: Throwable) {}
       for (delay in longArrayOf(150L, 600L, 1500L)) {
         wv.postDelayed({ pushInsets(content) }, delay)
       }
@@ -300,6 +338,7 @@ class MainActivity : TauriActivity() {
   // Also accept projects already generated with previous versions of this bridge.
   const previousPatchedHashes = new Set([
     "52a0435284e8cd76196b4e73ab2f8394f041675f7736af31e6c083aae4e72c31",
+    "fd5f83e7377db5344964105d5a5eeaf332c598080ac1820c07e596c65b9f60e4",
   ]);
   if (![templateActivity, patchedActivity].some((expected) => normalize(expected) === normalized) &&
       !previousPatchedHashes.has(createHash("sha256").update(normalized).digest("hex"))) {

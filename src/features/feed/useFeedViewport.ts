@@ -359,7 +359,9 @@ export function useFeedViewport({
   const exitFs = useCallback(() => {
     setClean(false);
     setFs(false);
-  }, [setClean, setFs]);
+    keepAlive();
+    wake();
+  }, [setClean, setFs, keepAlive, wake]);
 
   useFsOrientation(fs, isDesktop, keepAlive, active);
 

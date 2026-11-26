@@ -15,6 +15,7 @@ import { autoLineEnabled, setAutoLine } from "../../shared/network/autoLine";
 import { copyPlaybackLog, initPlaybackLog, setPlaybackLog, tracePlayback, usePlaybackLog } from "../../shared/diagnostics/playbackDiagnostics";
 import { formatNetDiag, shortVerdict } from "../../shared/diagnostics/netDiagReport";
 import { copyText } from "../../shared/lib/clipboard";
+import { HAPTIC_LEVELS, setHapticLevel, triggerHaptic, useHapticLevel, type HapticLevel } from "../../shared/lib/haptics";
 import { Loader } from "../../shared/ui/ios/effects";
 import { isBalanceVolumeSupported } from "../playback/balanceVolume";
 import { IBack, IBoltF, IBroom, IChevR, ICompress, IGlobe, IHeart, IHome, IInfo, ILink, ILockF, IMoon, IRefresh, IScan, ISun, IVol, IVolMute } from "../../shared/ui/icons";
@@ -27,6 +28,7 @@ type SettingGroup = typeof SETTING_GROUPS[number];
    入口：Windows 侧栏「设置」、Android「我的」右上角齿轮 */
 export default function Settings({ onBack, initialSection }: { onBack: () => void; wide: boolean; initialSection?: "内容偏好" }) {
   const locale = useLocale();
+  const hapticLevel = useHapticLevel();
   const [localeBusy, setLocaleBusy] = useState(false);
   const { theme, themePreference, setTheme, favs, history, muteOnStartup, setMuteOnStartup, preferHevc, setPreferHevc, balanceVolume, setBalanceVolume, fsIdleSecs, setFsIdleSecs, startupTab, setStartupTab, ambientGlow, setAmbientGlow, strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity, toast } = useStore();
   const [about, setAbout] = useState(false);
@@ -181,6 +183,24 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
                 ))}
               </SegmentedControl>
             </div>
+            {isMobile && <div className="ios-settings-row flex-wrap">
+              <span className="ios-setting-icon"><IBoltF size={16} /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[14px] text-on">{tr("按键震动反馈")}</div>
+                <div className="text-[12px] text-mut">{tr("点击按键与手势操作时的触感反馈强度")}</div>
+              </div>
+              <SegmentedControl className="w-full" aria-label={tr("按键震动反馈")} activeIndex={HAPTIC_LEVELS.indexOf(hapticLevel)}>
+                {([["off", tr("关")], ["light", tr("轻")], ["medium", tr("中")], ["strong", tr("强")]] as readonly [HapticLevel, string][]).map(([level, label]) => (
+                  <Button key={level} type="button" data-no-haptic aria-pressed={hapticLevel === level}
+                    onClick={() => {
+                      setHapticLevel(level);
+                      if (level !== "off") triggerHaptic("tap", level);
+                    }}>
+                    {label}
+                  </Button>
+                ))}
+              </SegmentedControl>
+            </div>}
           </>)}
 
           {section(N_("播放"), <>

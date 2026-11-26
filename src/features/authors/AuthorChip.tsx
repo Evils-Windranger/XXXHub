@@ -3,6 +3,7 @@ import { fmt } from "../../shared/api/api";
 import { Button } from "../../shared/ui/ios/controls";
 import { IUserF } from "../../shared/ui/icons";
 import { tr } from "../../shared/i18n";
+import { triggerHaptic } from "../../shared/lib/haptics";
 import type { AuthorItem } from "./authorDirectory";
 
 const HOLD_MS = 600;
@@ -47,7 +48,7 @@ export function AuthorChip({ author, followed, busy = false, showFollowers = tru
       suppressClick.current = true;
       origin.current = null;
       setPressing(false);
-      navigator.vibrate?.(8);
+      triggerHaptic("medium");
       onToggleFollow(author);
     }, HOLD_MS);
   };

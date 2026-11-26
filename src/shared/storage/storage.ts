@@ -4,6 +4,7 @@ export const STORAGE_KEYS = {
   theme: "hghubx_theme",
   autoLine: "hghubx_auto_line",
   locale: "hghubx_locale",
+  haptic: "hghubx_haptic_v1",
 } as const;
 
 type StorageKey = typeof STORAGE_KEYS[keyof typeof STORAGE_KEYS];

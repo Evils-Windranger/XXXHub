@@ -900,6 +900,11 @@ const en: Record<string, string> = {
   "自动隐藏含已屏蔽标签的内容": "Automatically hide content matching blocked tags",
   "超过 {0} MB 时自动清理旧缓存": "Auto-clears oldest cache above {0} MB",
   "还没有屏蔽标签，也可在播放页长按标签添加。": "No blocked tags yet. You can also long-press any tag while watching to block it.",
+  "按键震动反馈": "Haptic Feedback",
+  "点击按键与手势操作时的触感反馈强度": "Vibration strength for button taps and gestures",
+  "轻": "Light",
+  "中": "Medium",
+  "强": "Strong",
 };
 
 export default en;

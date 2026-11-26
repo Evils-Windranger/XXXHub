@@ -1,3 +1,5 @@
+import { triggerHaptic } from "../../shared/lib/haptics";
+
 export const HOLD_DELAY_MS = 260;
 /** 统一连续长按调速滑轨：去掉 1× 停顿档，左半屏起手 0.5×、右半屏起手 2×，不松手跨区直拖零停顿切换。 */
 export const HOLD_SPEED_STEPS = [0.5, 0.75, 1.5, 2, 3, 4, 6] as const;
@@ -51,7 +53,7 @@ export function shiftHoldSpeed(s: HoldSpeed, x: number, width = 0): number | nul
       const next = extraLeft >= HOLD_STEP_DISTANCE ? HOLD_SLOW_START : HOLD_SLOW_EDGE;
       s.travel = extraLeft >= HOLD_STEP_DISTANCE ? 0 : -extraLeft;
       s.rate = next;
-      try { navigator.vibrate?.(15); } catch { /* ignore */ }
+      triggerHaptic("tick");
       return next;
     }
 
@@ -62,7 +64,7 @@ export function shiftHoldSpeed(s: HoldSpeed, x: number, width = 0): number | nul
       const next = HOLD_SPEED_STEPS[Math.min(HOLD_SPEED_STEPS.length - 1, fastIdx + bonusSteps)];
       s.travel = extraRight - bonusSteps * HOLD_STEP_DISTANCE;
       s.rate = next;
-      try { navigator.vibrate?.(15); } catch { /* ignore */ }
+      triggerHaptic("tick");
       return next;
     }
   }
@@ -76,7 +78,7 @@ export function shiftHoldSpeed(s: HoldSpeed, x: number, width = 0): number | nul
   const next = HOLD_SPEED_STEPS[Math.min(HOLD_SPEED_STEPS.length - 1, Math.max(0, base + steps))];
   if (next === s.rate) { s.travel = 0; return null; }
   s.rate = next;
-  try { navigator.vibrate?.(15); } catch { /* ignore */ }
+  triggerHaptic("tick");
   return next;
 }
 

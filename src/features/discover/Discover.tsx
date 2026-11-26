@@ -16,6 +16,7 @@ import { VideoSortMenu } from "../../shared/ui/VideoSortMenu";
 import { TagStatusMenu, type WorkStatus } from "./TagStatusMenu";
 import { sortVideosByMetric, type VideoSortDirection, type VideoSortMetric } from "../../shared/model/videoSort";
 import { clearTagVideoCountCache, useNonEmptyTags } from "./useNonEmptyTags";
+import { triggerHaptic } from "../../shared/lib/haptics";
 
 const TopicIcon = ILayers;
 const TagIcon = ITag;
@@ -326,7 +327,7 @@ function TagPinChip({ name, hotScore, pinned, board = false, onOpen, onTogglePin
       suppressClick.current = true;
       origin.current = null;
       setPressing(false);
-      navigator.vibrate?.(8);
+      triggerHaptic("medium");
       onTogglePin(name);
     }, TAG_PIN_HOLD_MS);
   };
