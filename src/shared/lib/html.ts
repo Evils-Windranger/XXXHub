@@ -74,6 +74,13 @@ function abs(raw: string, strict = isStrictSecurity()): string {
   } catch { return ""; }
 }
 
+function normalizeInternalVideoUri(raw: string): string {
+  const m = /^hg:\/\/video\/(\d+)\/?$/i.exec((raw || "").trim());
+  if (!m) return "";
+  const id = Number(m[1]);
+  return Number.isSafeInteger(id) && id > 0 ? `hg://video/${id}` : "";
+}
+
 /** 把正文里的图片换成走本地协议（带 Referer / 解密能力） */
 function proxyImages(html: string, strict = isStrictSecurity()): string {
   if (!html) return "";
@@ -107,6 +114,13 @@ function proxyImages(html: string, strict = isStrictSecurity()): string {
   // 正文链接补全，避免点开指向本地
   doc.querySelectorAll("a[href]").forEach((a) => {
     const href = (a.getAttribute("href") || "").trim();
+    const internalVideo = normalizeInternalVideoUri(href);
+    if (internalVideo) {
+      a.setAttribute("href", internalVideo);
+      a.removeAttribute("target");
+      a.removeAttribute("rel");
+      return;
+    }
     const full = abs(href, strict);
     if (full) {
       a.setAttribute("href", full);
@@ -130,7 +144,7 @@ const STRICT_FINAL_ATTR = [
   "href", "src", "alt", "title", "colspan", "rowspan", "start", "target", "rel", "loading",
 ];
 // 保留 DOMPurify 的安全 URL/普通属性值规则，并允许本应用的 macOS 图片协议。
-const SAFE_FINAL_URI = /^(?:(?:https?|ftp|ftps|tel|mailto|callto|sms|cid|xmpp|matrix):|hg:\/\/localhost\/|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+const SAFE_FINAL_URI = /^(?:(?:https?|ftp|ftps|tel|mailto|callto|sms|cid|xmpp|matrix):|hg:\/\/(?:localhost\/|video\/\d+\/?$)|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
 
 /** 正文只接受所需 HTML 排版，不允许 SVG/MathML、事件、样式和可执行 URL。 */
 export function sanitizeHtml(html: string): string {
@@ -169,10 +183,21 @@ export function sanitizeHtml(html: string): string {
   });
 }
 
-/** 识别正文内的同源站内视频链接（`/video/{id}/`），外链与异常路径返回 `null` */
-export function parseInternalVideoId(rawUrl: string, extraOrigins: readonly string[] = []): number | null {
+/** 识别正文内的同源视频链接（`hg://video/{id}` 或视频源配置的 `videoIdPathPattern`），外链与异常路径返回 `null` */
+export function parseInternalVideoId(
+  rawUrl: string,
+  extraOrigins: readonly string[] = [],
+  videoIdPathPattern?: string | null,
+): number | null {
   const trimmed = rawUrl.trim();
   if (!trimmed) return null;
+  const schemeMatch = /^hg:\/\/video\/(\d+)\/?$/i.exec(trimmed);
+  if (schemeMatch) {
+    const id = Number(schemeMatch[1]);
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
+  }
+  const pat = typeof videoIdPathPattern === "string" ? videoIdPathPattern.trim() : "";
+  if (!pat || pat.length > 128) return null;
   let parsed: URL;
   try {
     parsed = activeSiteOrigin ? new URL(trimmed, activeSiteOrigin) : new URL(trimmed);
@@ -190,9 +215,21 @@ export function parseInternalVideoId(rawUrl: string, extraOrigins: readonly stri
     } catch { /* ignore invalid extra origin */ }
   }
   if (!allowedOrigins.has(parsed.origin)) return null;
-  const match = /^\/video\/(\d+)\/?$/.exec(parsed.pathname);
-  if (!match) return null;
-  const id = Number(match[1]);
+  let re: RegExp;
+  try {
+    if (pat.includes("{id}")) {
+      const escaped = pat.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\{id\\\}/g, "(\\d+)");
+      re = new RegExp(`^${escaped.replace(/\/+$/, "")}/?$`);
+    } else {
+      re = new RegExp(pat);
+    }
+  } catch {
+    return null;
+  }
+  const match = re.exec(parsed.pathname);
+  const rawId = match?.[1];
+  if (!rawId || !/^\d+$/.test(rawId)) return null;
+  const id = Number(rawId);
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
@@ -205,6 +242,12 @@ export function handleArticleClick(
   if (!el) return;
   e.preventDefault();
   e.stopPropagation();
-  const href = abs(el.getAttribute("href") || "", isStrictSecurity());
+  const rawHref = (el.getAttribute("href") || "").trim();
+  const internalVideo = normalizeInternalVideoUri(rawHref);
+  if (internalVideo) {
+    if (onOpenUrl) onOpenUrl(internalVideo);
+    return;
+  }
+  const href = abs(rawHref, isStrictSecurity());
   if (href && onOpenUrl) onOpenUrl(href);
 }

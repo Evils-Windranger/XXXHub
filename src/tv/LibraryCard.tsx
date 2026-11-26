@@ -6,7 +6,7 @@ import { useTv } from "./TvProvider";
 import { TvCard } from "./ui";
 
 export function LibraryCard({ content, onOpen, active }: { content: TvContent; onOpen: (content: TvContent) => void; active: boolean }) {
-  const { source, sourceKey } = useTv(), preferences = useContentPreferences();
+  const { source, sourceKey, activeSource } = useTv(), preferences = useContentPreferences();
   const root = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false), [foreground, setForeground] = useState(!document.hidden);
   const [attempt, setAttempt] = useState(0), [failed, setFailed] = useState("");
@@ -15,7 +15,8 @@ export function LibraryCard({ content, onOpen, active }: { content: TvContent; o
   // Unknown tags in a legacy record must first be resolved. Once known, the
   // ordinary block rules decide if any title/cover can be mounted.
   const blockedKnownTags = content.tags.length > 0 && !!preferences.blockReason(content.tags);
-  const eligible = missing && active && visible && foreground && !!source && !blockedKnownTags;
+  const postSupported = content.kind !== "post" || !activeSource || activeSource.capabilities.posts;
+  const eligible = missing && active && visible && foreground && !!source && !blockedKnownTags && postSupported;
   const latest = useRef({ request, eligible }); latest.current = { request, eligible };
   const error = failed === request;
   useEffect(() => {

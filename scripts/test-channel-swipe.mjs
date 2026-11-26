@@ -55,9 +55,9 @@ try {
   const activeTab = () => page.locator(".ios-subpage-header [aria-pressed=\"true\"]").innerText();
 
   const cases = [
-    ["ai-duanju", ["最近更新", "当前热播", "精选推荐"]],
-    ["ai-manju", ["最近更新", "当前热播", "精选推荐"]],
-    ["original", ["全部原创", "原创漫剧", "原创短剧"]],
+    ["featured", ["最近更新", "当前热播", "精选推荐"]],
+    ["archive", ["最近更新", "当前热播", "精选推荐"]],
+    ["special", ["全部专题", "热门专题", "最新专题"]],
   ];
   for (const [cate, tabs] of cases) {
     await page.goto(new URL(`/tests/channel-swipe.html?cate=${cate}`, origin).href, { waitUntil: "networkidle" });

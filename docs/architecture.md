@@ -15,9 +15,10 @@ src/
 │   ├── AcceptedApp.tsx      协议确认后的应用装配（AppProvider + 自动选线 + App）
 │   ├── App.tsx              页面栈、布局、全局返回与键盘处理
 │   ├── shell/               桌面标题栏、侧栏、窗口缩放热区
-│   └── startup/             启动动画与使用协议门
+│   └── startup/             启动动画、使用协议门与视频源引导（SourceOnboarding）
 ├── features/
 │   ├── account/             登录、个人中心、用户页与关注列表
+│   ├── authors/             创作者目录、搜索与关注状态
 │   ├── category/            分类与频道页
 │   ├── discover/            专题与标签页
 │   ├── feed/                首页、列表播放、详情面板、标签门、触屏长按
@@ -72,7 +73,8 @@ external store，由多个页面共享，而非设置页私有状态。
 
 ## Rust 与验证文件
 
-`src-tauri/src/api/`、`net/`、`media/`、`lines/` 分别承载命令、网络、媒体协议与线路解析。
+`src-tauri/src/api/`、`net/`、`media/`、`lines/`、`source/` 分别承载命令、网络、媒体协议、
+源驱动线路选择与 QuickJS 视频源沙箱/验签/局域网推源；`authors.rs` 承载作者目录命令。
 平台壳、会话、缓存和安全策略仍保留在 `src-tauri/src/` 顶层；没有创建 `platform/` 或
 `state/` 目录。完整调用路径见各子系统页。
 

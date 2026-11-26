@@ -28,18 +28,20 @@ ad-hoc 签名都不应进入仓库或本机脚本输出。
   - TV 版 CI：[`.github/workflows/tv.yml`](../../.github/workflows/tv.yml)（名称 `TV CI`），负责 TV 版按路径过滤的构建与遥控器验收（`acceptance`）。
   - TV 版 CD：[`.github/workflows/tv-release.yml`](../../.github/workflows/tv-release.yml)（名称 `TV Release`），先执行 `preflight` 校验 TV 版本号/字典/文档，再执行 `package` 与 `release`（`--latest=false` 不抢占仓库 `Latest` 徽章）。
   - 测试预览：[`.github/workflows/sync-test-branch.yml`](../../.github/workflows/sync-test-branch.yml)（名称 `Sync Test Branch`）、[`.github/workflows/test-preview.yml`](../../.github/workflows/test-preview.yml)（名称 `Test Preview`）与 [`scripts/sync-test-branch.mjs`](../../scripts/sync-test-branch.mjs)。`Sync Test Branch` 在 PR/推送 `main` 时仅执行约 15 秒的标签门禁与 `test` 分支合流（`cancel-in-progress: false`，绝不互杀污染 PR 状态；Draft 草稿不提前贴标，纯文档/工作流 PR 自动跳过，拦截外部 PR 修改 `.github/`）；`Test Preview` 通过 `workflow_run` 异步承接 6 平台隔离编译（无密钥）与独立干净运行器 APK 签名，支持手动按单平台重编并原地零 404 空窗滚动更新 `test-pre` Pre-release（`--latest=false`）。`Test Preview` 将 `concurrency` 下沉至各平台构建 job（`cancel-in-progress: true`）与发布 job（`cancel-in-progress: false`），`should_build=false` 的空跑不会取消进行中的构建；`sync-test-branch.mjs` 还会比对 `refs/tags/test-pre` 的树及活跃的 `Test Preview` 运行，在不打断运行中构建的前提下自动补建未发布的 `test` 提交。
-- 版本/预算门禁：[`scripts/set-version.mjs`](../../scripts/set-version.mjs)（支持 `--target standard|tv`）、
+- 版本/纯壳/预算门禁：[`scripts/set-version.mjs`](../../scripts/set-version.mjs)（支持 `--target standard|tv`）、
   [`scripts/check-version-sync.mjs`](../../scripts/check-version-sync.mjs)（支持 `--target all|standard|tv`）、
   [`scripts/check-doc-links.mjs`](../../scripts/check-doc-links.mjs)、
+  [`scripts/check-shell-purity.mjs`](../../scripts/check-shell-purity.mjs)、
   [`scripts/check-size-budgets.mjs`](../../scripts/check-size-budgets.mjs)、
-  [`tools/size-budgets.json`](../../tools/size-budgets.json)。
+  [`tools/size-budgets.json`](../../tools/size-budgets.json)、
+  [`scripts/pack-source.mjs`](../../scripts/pack-source.mjs)（视频源插件打包与 Ed25519 签名工具）。
 - iOS/TV 打包：[`scripts/build-ios-unsigned.sh`](../../scripts/build-ios-unsigned.sh)、
   [`scripts/build-android-tv.mjs`](../../scripts/build-android-tv.mjs)（含 `--android-init` / `--android-build` 临时覆盖与自动清理）、
   [`scripts/patch-android-tv.mjs`](../../scripts/patch-android-tv.mjs)；图标/启动屏：
   `generate-ios-icons.mjs`、`sync-ios-icons.mjs`、`patch-ios-splash.mjs`、
   `sync-android-icons.mjs`（同步 `src-tauri/icons/android/` 含 Android 13+ Material You 单色自适应图层 `drawable/ic_launcher_monochrome.xml` 与 `mipmap-anydpi-v26/ic_launcher*.xml`）、`patch-android-splash.mjs`。
 - 本地入口：[`Makefile`](../../Makefile) 的 `check`、`test-rust`、`test-web`、`test-tv`、`test-smoke`、
-  `docs`、`budget`、`release-check`。
+  `i18n`、`docs`、`budget`、`release-check`、`purity`。
 
 ## 主运行时路径
 
@@ -56,19 +58,20 @@ ad-hoc 签名都不应进入仓库或本机脚本输出。
 2. Tauri 构建的 `beforeBuildCommand` 在 Vite 构建后跑图标生成/同步和 Android 启动屏补丁
    （iOS 启动屏补丁由 `scripts/build-ios-unsigned.sh` 执行），再打包 `dist`。桌面入口为
    `pnpm tauri build`；开发为 `pnpm tauri dev`。
-3. `make check` 等价于 `test-rust` + `test-web` + `docs` + `budget` + `release-check`：
+3. `make check` 等价于 `test-rust` + `test-web` + `i18n` + `docs` + `budget` + `release-check` + `purity`：
    `cargo check --manifest-path src-tauri/Cargo.toml --all-targets`、
    `cargo test --manifest-path src-tauri/Cargo.toml --lib`、`pnpm build`、
-   `node scripts/check-doc-links.mjs`、`node scripts/check-size-budgets.mjs`、
-   `node scripts/check-version-sync.mjs`。它**不包含**
+   `node scripts/check-i18n.mjs`、`node scripts/check-doc-links.mjs`、
+   `node scripts/check-size-budgets.mjs`、`node scripts/check-version-sync.mjs`、
+   `node scripts/check-shell-purity.mjs`。它**不包含**
    `pnpm test:smoke`；smoke 由 CI 的独立 job 和 `make test-smoke` 执行。
 4. 标准版 CI 日常校验（`ci.yml`，`pull_request`、推送 `main` 或手动 `mode=ci`）：
-   - `frontend`：Node 22、pnpm 10、版本字段检查（同时校验标准版与 TV 版）、文档链接、标准版 `pnpm build`、尺寸预算。
+   - `frontend`：Node 22、pnpm 10、版本字段检查（同时校验标准版与 TV 版）、i18n 字典检查、文档链接、纯壳边界守卫（`check-shell-purity.mjs`）、标准版 `pnpm build`、尺寸预算。
    - `rust`：Linux 系统依赖、`cargo check --all-targets`、`cargo test --lib`。
    - `smoke`：安装 Chromium，运行 `pnpm test:smoke`。
    - `playback`：优先使用运行器的 FFmpeg 和浏览器；需要安装 FFmpeg 时沿用维护者指定的
      `https://mirrors.edge.kernel.org/ubuntu/`，失败不自动换源。单次工作流并行执行 `core` 与 `extended`
-     （覆盖 `seek,legacy,lifecycle,gesture,proxy,portrait-fit,ios-native,recovery,review,post-flicker`）；
+     （覆盖 `seek,legacy,lifecycle,gesture,proxy,portrait-fit,ambient,post-flicker,episode-toast,balance-volume,ios-native,recovery,review`）；
      `review` 场景运行 `scripts/test-round-review.mjs`（搜索返回键与网络设置检查）；账号同步/批量取消收藏
      回归 `scripts/test-account-sync-empty-state.mjs` 在 smoke 的 `account-sync` 套件中运行，不在 `review` 中重复执行。
      手动 `mode=playback` 可只跑播放诊断或指定 `scenarios` 子集（如 `pnpm test:playback --scenarios review`）。
@@ -159,6 +162,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib
 make check
 make test-tv
 node scripts/check-doc-links.mjs
+node scripts/check-shell-purity.mjs
 node scripts/check-version-sync.mjs
 node scripts/check-version-sync.mjs --target tv
 ```

@@ -37,7 +37,7 @@ try {
     isMobile: true,
     hasTouch: true,
   });
-  await context.addInitScript(installFixture, { theme: "dark", titles: ["示例短剧"] });
+  await context.addInitScript(installFixture, { theme: "dark", titles: ["示例视频"] });
   const page = await context.newPage();
   page.on("pageerror", error => report.errors.push(error.message));
   await page.route("**/*", route => {

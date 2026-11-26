@@ -40,7 +40,7 @@ export const isMobile = isAndroid || isIos;
 export const LOCAL =
   isMacos || isIos ? "hg://localhost" : isLinux ? "http://127.0.0.1:17650" : "http://hg.localhost";
 
-/** 封面：经本地协议解密（站点封面是 AES 密文）。 */
+/** 封面：经本地协议加载或解码。 */
 export const cover = (url?: string, _w = 480) =>
   url ? `${LOCAL}/img?u=${encodeURIComponent(url)}` : "";
 
@@ -148,12 +148,12 @@ export const api = {
     call<Paged<VideoCard>>("api_original_videos", { cate, page, size, sort: sort ?? null, jsonOnly }),
   rank: (kind: "hot" | "recommend" | "potential") =>
     call<{ type: string; items: RankItem[] }>("api_rank", { kind }),
-  /** 全站搜索。`kind` 省略时后端只搜短剧；吃瓜帖要显式传 "post"（issue #34）。 */
+  /** 全站搜索。`kind` 省略时默认搜视频；图文帖子需显式传 "post"。 */
   search: (q: string, page = 1, size = 20, kind?: "video" | "post") =>
     call<{ items: VideoCard[]; pagination: Paged<VideoCard>["pagination"]; keyword: string }>(
       "api_search", { q, page, size, kind: kind ?? null },
     ),
-  /** 只搜吃瓜帖：返回结构是 Post 而不是 VideoCard。 */
+  /** 只搜图文帖子：返回结构是 Post 而不是 VideoCard。 */
   searchPosts: (q: string, page = 1, size = 20) =>
     call<{ items: Post[]; pagination: Paged<Post>["pagination"]; keyword: string }>(
       "api_search", { q, page, size, kind: "post" },
@@ -162,7 +162,7 @@ export const api = {
   posts: (page = 1, size = 20, sort?: string) =>
     call<Paged<Post>>("api_posts", { page, size, sort: sort ?? null }),
   post: (id: number) => call<Post & { content?: string; video_url?: string }>("api_post", { id }),
-  /** 吃瓜帖视频：详情里 video_url 恒为空，地址由 playback 接口下发（可能多段）。 */
+  /** 帖子视频：详情里 video_url 为空时，由 playback 接口下发地址（可能多段）。 */
   postPlayback: (id: number) => call<{ mode?: number; videos?: { index: number; url: string }[] }>("api_post_playback", { id }),
 
   video: (id: number) => call<Detail>("api_video", { id }),
@@ -192,7 +192,7 @@ export const api = {
   collect: (id: number, on: boolean, identity?: AccountIdentity) => call<unknown>("api_collect", { id, on, expectedUserId: identity?.expectedUserId, expectedOrigin: identity?.expectedOrigin }),
   follow: (uid: number, on: boolean, identity?: AccountIdentity) => call<unknown>("api_follow", { uid, on, expectedUserId: identity?.expectedUserId, expectedOrigin: identity?.expectedOrigin }),
 
-  /* 线路（数据源）：固定线路写死在 Rust 侧，镜像线路从地址发布页拉、推荐镜像从发布入口页拉 */
+  /* 线路（数据源）：由当前激活的视频源声明与管理 */
   lineState: () => call<LineState>("line_state"),
   lineSet: (url: string) => call<string>("line_set", { url }),
   lineCustomSet: (url: string) => call<LineApply>("line_custom_set", { url }),
@@ -201,9 +201,9 @@ export const api = {
   lineMirrors: () => call<LineMirrors>("line_mirrors"),
   lineProbe: (urls: string[]) => call<LineProbe[]>("line_probe", { urls }),
   lineAuto: () => call<LineAuto>("line_auto"),
-  /* 当前是镜像时敲一次主站，通了就切回（不清会话） */
+  /* 当前为备选线路时尝试切回主线路（不清会话） */
   lineTryMain: () => call<LineTryMain>("line_try_main"),
-  /* 线路体检：探一次 /api/videos，和自动选线同一判据 */
+  /* 线路体检：按当前视频源的探活规则检测连通性 */
   lineHealth: () => call<LineHealth>("line_health"),
 
   /* 应用内代理：只影响本应用的上游网络请求。 */
@@ -291,7 +291,7 @@ export type ProxyState = {
 };
 export type ProxyProbe = { ok: boolean; status?: number | null; ms: number; error?: string; via?: string };
 
-/** 自动选线：主站可用时优先，否则检测可信发布页中的镜像。 */
+/** 自动选线：优先主线路，不可用时检测视频源提供的备选线路。 */
 export type LineAutoCandidate = {
   tier: "main" | "cn" | "mirror";
   url: string;
@@ -314,7 +314,7 @@ export type LineAuto = {
   };
 };
 
-/** 回切主站的探测结果：`probe.ok` 为主站到底通不通 */
+/** 回切默认线路的探测结果 */
 export type LineTryMain = {
   cancelled?: boolean;
   previous: string;
@@ -323,10 +323,25 @@ export type LineTryMain = {
   probe: { ok: boolean; base: string; tier: string; ms: number; status: number | null };
 };
 
+export type CatalogChannel = {
+  id: string;
+  label: string;
+  kind?: string;
+  sorts?: string[];
+};
+
+export type SourceCatalogConfig = {
+  channels?: CatalogChannel[];
+};
+
+export type SourceLinksConfig = {
+  videoIdPathPattern?: string;
+};
+
 export type SourceCapabilities = {
   home: boolean;
   search: boolean;
-  catalog: { categories: boolean; tags: boolean; rankings: boolean };
+  catalog: { categories: boolean; tags: boolean; rankings: boolean; authors?: boolean };
   detail: { episodes: boolean; related: boolean; comments: boolean };
   playback: { hls: boolean; mp4: boolean; subtitles: boolean };
   posts: boolean;
@@ -345,6 +360,8 @@ export type InstalledSourceSummary = {
   runtimeKind: string;
   origins: string[];
   capabilities: SourceCapabilities;
+  catalog?: SourceCatalogConfig;
+  links?: SourceLinksConfig;
   updateUrls: string[];
   signature: { status: "trusted" | "self_signed" | "unsigned" | string; keyId: string; fingerprint: string };
   installedAt: number;
@@ -478,9 +495,16 @@ export const hostOf = (url: string) => {
 export async function selfTest(): Promise<string> {
   const steps: string[] = [];
   try {
-    const info = await api.play(117, 3);
-    steps.push(`play:${info?.video_url ? "ok" : "empty"}`);
-    const hlsUrl = `${LOCAL}/hls?u=${encodeURIComponent(info.video_url)}`;
+    const feed = await api.feed(1, 1);
+    const firstId = feed?.items?.[0]?.id;
+    if (!firstId) return "skip:no-item";
+    const detail = await api.video(firstId).catch(() => null);
+    const ep = detail?.episodes?.[0]?.ep_num ?? 1;
+    const info = await api.play(firstId, ep);
+    const playUrl = info?.streams?.main || info?.video_url || info?.streams?.hevc || info?.video_url_hevc || "";
+    steps.push(`play:${playUrl ? "ok" : "empty"}`);
+    if (!playUrl) return steps.join(" | ");
+    const hlsUrl = `${LOCAL}/hls?u=${encodeURIComponent(playUrl)}`;
     const r1 = await fetch(hlsUrl);
     const txt = await r1.text();
     steps.push(`hls:${r1.status}/${txt.length}/${txt.startsWith("#EXTM3U") ? "m3u8" : "bad"}`);

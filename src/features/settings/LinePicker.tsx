@@ -208,7 +208,7 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
             <p id="custom-line-hint" className="text-[12px] text-mut leading-relaxed mt-2">{tr("填写你信任的 HTTPS 站点。登录请求会发送到该站点；切换到其他站点后需重新登录。")}</p>
             {customError && <p id="custom-line-error" role="alert" className="text-[13px] text-danger break-words mt-2">{customError}</p>}
             <div className="flex gap-2 mt-3">
-              <Button variant="secondary" disabled={busyAll} onClick={() => { void applyLine("reset", api.lineReset); }} className="min-h-12 px-3 flex-1">{switching === "reset" ? tr("恢复中…") : tr("恢复主站")}</Button>
+              <Button variant="secondary" disabled={busyAll} onClick={() => { void applyLine("reset", api.lineReset); }} className="min-h-12 px-3 flex-1">{switching === "reset" ? tr("恢复中…") : tr("恢复默认")}</Button>
               <Button variant="primary" disabled={busyAll} type="submit" className="min-h-12 px-3 flex-1">{switching === "custom" ? tr("保存中…") : tr("保存镜像")}</Button>
             </div>
           </form>
@@ -233,7 +233,7 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
 
         <GroupHead
           title={tr("镜像线路")}
-          hint={tr("来自地址发布页")}
+          hint={tr("来自当前视频源")}
           actions={
             <>
               <Button onClick={() => { void readMirrors(); }} disabled={loadingMirrors}
@@ -258,7 +258,7 @@ export default function LinePicker({ open, onClose }: { open: boolean; onClose: 
             </div>
           )}
           {!loadingMirrors && !mirrorErr && mirrors?.length === 0 && (
-            <div className="px-3.5 py-3 text-[12px] text-mut">{tr("地址发布页里没有可用的镜像地址")}</div>
+            <div className="px-3.5 py-3 text-[12px] text-mut">{tr("当前视频源没有提供备选线路")}</div>
           )}
           {!loadingMirrors && mirrorItems.map((it) => (
             <Row key={it.url} item={it} current={state?.base === it.url} probe={probes[it.url]}

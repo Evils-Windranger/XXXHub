@@ -1,8 +1,8 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from "react";
 import { addPluginListener, invoke } from "@tauri-apps/api/core";
 import App from "./App";
 import SourceOnboarding from "./startup/SourceOnboarding";
-import { api, isMobile, platform, type SourceStateSnapshot } from "../shared/api/api";
+import { api, isMobile, platform } from "../shared/api/api";
 import { runBack } from "../shared/lib/back";
 import { usePendingDeepLink } from "../shared/lib/deepLink";
 import { AppProvider, useStore } from "../shared/model/store";
@@ -78,28 +78,9 @@ function DeepLinkImportPrompt({ onImported }: { onImported: () => void }) {
 
 function SourceGate() {
   useLocale();
-  const [sourceState, setSourceState] = useState<SourceStateSnapshot | null | "unsupported">(null);
+  const { sourceState, activeSource, refreshSourceState } = useStore();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [wide, setWide] = useState(() => window.innerWidth >= 860);
-
-  const refresh = useCallback(() => {
-    api.sourceState()
-      .then((snap) => {
-        if (snap && typeof snap === "object" && Array.isArray(snap.sources)) {
-          setSourceState(snap);
-        } else {
-          // Mocked browser fixtures that don't implement source_state proceed directly.
-          setSourceState("unsupported");
-        }
-      })
-      .catch(() => setSourceState("unsupported"));
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    window.addEventListener("hg:source-changed", refresh);
-    return () => window.removeEventListener("hg:source-changed", refresh);
-  }, [refresh]);
 
   useEffect(() => {
     const onResize = () => setWide(window.innerWidth >= 860);
@@ -114,16 +95,18 @@ function SourceGate() {
   useEffect(() => {
     if (readyForApp) {
       setSettingsOpen(false);
-      initAutoLine();
+      if (sourceState === "unsupported" || activeSource?.capabilities.lines) {
+        initAutoLine();
+      }
     }
-  }, [readyForApp]);
+  }, [readyForApp, sourceState, activeSource?.capabilities.lines]);
 
   const preSourceBackRef = useRef<() => void>(() => {});
   preSourceBackRef.current = () => {
     if (runBack()) return;
     if (settingsOpen) {
       setSettingsOpen(false);
-      refresh();
+      refreshSourceState();
       return;
     }
     if (platform === "android") {
@@ -162,16 +145,16 @@ function SourceGate() {
       <div className={`fixed inset-0 bg-bg plat-${platform}`} style={preSourceShellStyle()}>
         {settingsOpen ? (
           <Suspense fallback={null}>
-            <Settings wide={wide} onBack={() => { setSettingsOpen(false); refresh(); }} />
+            <Settings wide={wide} onBack={() => { setSettingsOpen(false); refreshSourceState(); }} />
           </Suspense>
         ) : (
           <SourceOnboarding
             state={sourceState}
-            onChanged={refresh}
+            onChanged={refreshSourceState}
             onOpenSettings={() => setSettingsOpen(true)}
           />
         )}
-        <DeepLinkImportPrompt onImported={refresh} />
+        <DeepLinkImportPrompt onImported={refreshSourceState} />
         <ToastHost />
       </div>
     );
@@ -179,7 +162,7 @@ function SourceGate() {
   return (
     <>
       <App />
-      <DeepLinkImportPrompt onImported={refresh} />
+      <DeepLinkImportPrompt onImported={refreshSourceState} />
     </>
   );
 }

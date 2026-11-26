@@ -173,7 +173,7 @@ pub async fn line_try_main(state: State<'_, Api>) -> Result<Value, String> {
     }))
 }
 
-/// 线路体检：探一次 `/api/videos`，和自动选线用同一个判据。
+/// 线路体检：调用活动源 `probeLine`（或回退 `home`）探测当前线路，和自动选线用同一个判据。
 #[tauri::command]
 pub async fn line_health() -> Result<Value, String> {
     Ok(crate::lines::health().await)

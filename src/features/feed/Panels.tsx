@@ -60,7 +60,7 @@ export function EpisodesPanel({ episodes, current, onPick, onClose, bare = false
 export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
   videoId: number; ep: number; total: number; kind?: "video" | "post"; onClose: () => void;
 }) {
-  const { user, setLoginOpen, toast, accountScope, lineEpoch } = useStore();
+  const { user, setLoginOpen, toast, accountScope, lineEpoch, capabilities } = useStore();
   const [items, setItems] = useState<Comment[]>([]);
   const [page, setPage] = useState(0);
   const [pages, setPages] = useState(1);
@@ -185,7 +185,7 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
         )}
       </div>
 
-      {kind === "video" && (
+      {kind === "video" && capabilities.account && (
         <Form className="shrink-0 flex items-center gap-2 px-3 py-2.5 bg-s2/70" onSubmit={(e) => { e.preventDefault(); send(); }}>
           <Avatar size={30} name={user?.nickname || tr("我")} hue={322} />
           <Input ref={inputRef} disabled={sending} value={text} onChange={(e) => setText(e.target.value)}
@@ -202,14 +202,14 @@ export function CommentsPanel({ videoId, ep, total, kind = "video", onClose }: {
     </div>
   );
 }
-/* ================= 图文正文（吃瓜） ================= */
+/* ================= 图文正文 ================= */
 export function ArticlePanel({ title, html, cover, hot, onClose }: {
   title: string; html: string; cover?: string; hot?: number; onClose: () => void;
 }) {
-  const { toast, strictSecurity, push } = useStore();
+  const { toast, strictSecurity, push, activeSource } = useStore();
   const safeHtml = useMemo(() => sanitizeHtml(html), [html, strictSecurity]);
   const openSafeLink = (url: string) => {
-    const videoId = parseInternalVideoId(url);
+    const videoId = parseInternalVideoId(url, activeSource?.origins ?? [], activeSource?.links?.videoIdPathPattern);
     if (videoId !== null) {
       push({ kind: "feed", videoIds: [videoId], index: 0, title: title || tr("图文详情") });
       return;

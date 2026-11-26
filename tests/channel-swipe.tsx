@@ -3,7 +3,7 @@ import { AppProvider } from "../src/shared/model/store";
 import { ChannelPage, CHANNELS } from "../src/features/category/Category";
 import "../src/index.css";
 
-const cate = new URLSearchParams(location.search).get("cate") || "ai-duanju";
+const cate = new URLSearchParams(location.search).get("cate") || "featured";
 const name = CHANNELS.find(channel => channel.cate === cate)?.name || cate;
 
 createRoot(document.querySelector("#root")!).render(

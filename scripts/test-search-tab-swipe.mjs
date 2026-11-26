@@ -39,7 +39,7 @@ try {
   await page.goto(new URL("/tests/search-tab-swipe.html", origin).href, { waitUntil: "networkidle" });
   await page.locator(".ios-page").waitFor();
 
-  const input = page.getByRole("textbox", { name: "搜索短剧、帖子、题材…" });
+  const input = page.getByRole("textbox", { name: "搜索视频、帖子、题材…" });
   await input.fill("仙侠");
   await input.press("Enter");
   await page.locator('[aria-label="搜索结果类型"]').waitFor();

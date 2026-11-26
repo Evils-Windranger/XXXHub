@@ -8,7 +8,7 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer } from "vite";
 import { chromium } from "playwright-core";
 
-// issue #165 回归：吃瓜详情的线路/代理事件不得清空已显示内容。
+// issue #165 回归：帖子详情的线路/代理事件不得清空已显示内容。
 //   契约 1：hg:line-changed / hg:proxy-changed 后正文与滚动位置保留、不出现整页 Loader、
 //           播放器不重建、播放不中断；后台确实重新请求了 api_post 与 api_post_playback。
 //   契约 2：换帖子 id 仍然整页重置（清空重置只属于换帖子/换账号）。

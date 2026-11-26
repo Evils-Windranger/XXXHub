@@ -11,32 +11,47 @@ import { useAuthorFollow } from "./useAuthorFollow";
 import { asAuthor, loadAuthors, MAX_FOLLOWED_AUTHORS, subscribeAuthors, type AuthorDirectory, type AuthorItem } from "./authorDirectory";
 
 export function AuthorsPage({ onBack, wide }: { onBack: () => void; wide: boolean }) {
-  const { push, lineEpoch, follows } = useStore();
+  const { push, lineEpoch, follows, activeSource, sourceStateStatus, capabilities } = useStore();
   const { busyId, toggleFollow } = useAuthorFollow();
   const [authors, setAuthors] = useState<AuthorItem[] | null>(null);
   const [total, setTotal] = useState(0);
+  const [supported, setSupported] = useState(true);
   const [followedAuthors, setFollowedAuthors] = useState<AuthorItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const canAuthors = sourceStateStatus !== "ready" || capabilities.catalog.authors;
+  const cacheKey = `${activeSource?.id ?? "default"}:${lineEpoch}`;
 
   const accept = useCallback((directory: AuthorDirectory) => {
+    setSupported(directory.supported);
     setAuthors(directory.items);
     setTotal(directory.total);
   }, []);
 
   const load = useCallback(async (force = false) => {
+    if (!canAuthors) {
+      setSupported(false);
+      setAuthors([]);
+      setTotal(0);
+      setLoading(false);
+      setError("");
+      return;
+    }
     setLoading(true); setError("");
-    try { accept(await loadAuthors(lineEpoch, force)); }
+    try { accept(await loadAuthors(cacheKey, force)); }
     catch (cause) { setError(cause instanceof Error ? cause.message : tr("作者加载失败，请重试")); }
     finally { setLoading(false); }
-  }, [accept, lineEpoch]);
+  }, [accept, cacheKey, canAuthors]);
 
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => subscribeAuthors(accept), [accept]);
+  useEffect(() => subscribeAuthors((directory, key) => {
+    if (key === cacheKey) accept(directory);
+  }), [accept, cacheKey]);
 
   const followedIds = follows.slice(0, MAX_FOLLOWED_AUTHORS);
   const followedKey = followedIds.join(",");
   useEffect(() => {
+    if (!canAuthors || !supported) { setFollowedAuthors([]); return; }
     const ids = followedKey ? followedKey.split(",").map(Number) : [];
     if (!ids.length) { setFollowedAuthors([]); return; }
     let alive = true;
@@ -63,7 +78,7 @@ export function AuthorsPage({ onBack, wide }: { onBack: () => void; wide: boolea
       }
     })).then(results => finish(results.filter((author): author is AuthorItem => !!author)));
     return () => { alive = false; };
-  }, [authors, followedKey]);
+  }, [authors, canAuthors, followedKey, supported]);
 
   const openAuthor = (author: AuthorItem) => push({ kind: "user", id: author.id, name: author.name });
   const isFollowing = (id: number) => follows.includes(id);
@@ -75,13 +90,15 @@ export function AuthorsPage({ onBack, wide }: { onBack: () => void; wide: boolea
         <span className="w-9 h-9 rounded-[12px] bg-pc text-on-pc flex items-center justify-center shrink-0"><IUserF size={18} /></span>
         <div className="flex-1 min-w-0">
           <h1 className="text-[17px] font-bold text-on leading-tight">{tr("作者")}</h1>
-          <div className="text-[12px] text-mut leading-tight mt-0.5 tabular-nums">{loading && !authors ? tr("加载中…") : tr("{0} 位作者 · {1} 位已关注", total, follows.length)}</div>
+          <div className="text-[12px] text-mut leading-tight mt-0.5 tabular-nums">{!canAuthors || !supported ? tr("当前视频源不支持作者目录") : loading && !authors ? tr("加载中…") : tr("{0} 位作者 · {1} 位已关注", total, follows.length)}</div>
         </div>
-        <Button aria-label={tr("刷新作者")} disabled={loading} aria-busy={loading} onClick={() => void load(true)} className="ios-nav-btn">{loading ? <Loader className="w-4 h-4" /> : <IRefresh size={18} />}</Button>
+        {canAuthors && supported && (
+          <Button aria-label={tr("刷新作者")} disabled={loading} aria-busy={loading} onClick={() => void load(true)} className="ios-nav-btn">{loading ? <Loader className="w-4 h-4" /> : <IRefresh size={18} />}</Button>
+        )}
       </div>
     </div>
     <div className="flex-1 scroll-y pt-3.5 pb-8" aria-busy={loading}>
-      {authors?.length ? <Surface data-followed-board aria-label={tr("已关注作者")} className="mb-3.5 rounded-[22px] bg-s1 p-4 a-rise">
+      {canAuthors && supported && authors?.length ? <Surface data-followed-board aria-label={tr("已关注作者")} className="mb-3.5 rounded-[22px] bg-s1 p-4 a-rise">
         <div className="flex items-baseline justify-between gap-2">
           <h2 className="flex items-center gap-1.5 text-[14.5px] font-bold text-on"><IHeart size={15} className="text-primary" />{tr("已关注作者")}</h2>
           <span className="text-[12px] text-dim tabular-nums" aria-live="polite">{tr("共 {0} 位", follows.length)}</span>
@@ -92,7 +109,9 @@ export function AuthorsPage({ onBack, wide }: { onBack: () => void; wide: boolea
             busy={busyId === author.id} onOpen={() => openAuthor(author)} onToggleFollow={toggleFollow} />)}
         </div>}
       </Surface> : null}
-      {loading && !authors ? (
+      {!canAuthors || !supported ? (
+        <Empty icon={<IUserF size={26} />} title={tr("当前视频源不支持作者目录")} />
+      ) : loading && !authors ? (
         <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
       ) : error && !authors ? (
         <Empty icon={<IUserF size={26} />} title={tr("作者加载失败")} sub={error} action={tr("重试")} onAction={() => void load(true)} />

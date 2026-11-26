@@ -4,6 +4,7 @@ use super::client::get_with_dns;
 use super::line::base;
 use super::redact::{err_text, heal_client};
 use super::{MEDIA_DNS_ROUTES, NEXT_REQUEST};
+#[cfg(test)]
 use crate::network_policy;
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -54,6 +55,7 @@ where
     Err(last)
 }
 
+#[cfg(test)]
 pub(crate) fn edge_redirect_target(
     current: &url::Url,
     status: u16,

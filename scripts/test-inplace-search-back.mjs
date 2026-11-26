@@ -48,9 +48,9 @@ try {
   await page.getByRole("button").filter({ has: page.getByText("专题", { exact: true }) }).click();
   await page.getByRole("heading", { name: "专题", exact: true }).waitFor();
 
-  const searchButton = page.getByRole("button", { name: "搜索短剧", exact: true });
+  const searchButton = page.getByRole("button", { name: "搜索", exact: true });
   await searchButton.click();
-  const field = page.getByRole("textbox", { name: "短剧搜索关键词", exact: true });
+  const field = page.getByRole("textbox", { name: "视频搜索关键词", exact: true });
   await field.waitFor();
   await field.fill("都市");
   await field.press("Enter");
@@ -84,7 +84,7 @@ try {
   await page.getByRole("button").filter({ has: page.getByText("专题", { exact: true }) }).click();
   await page.getByRole("heading", { name: "专题", exact: true }).waitFor();
   await searchButton.click();
-  const dialog = page.getByRole("dialog", { name: "短剧搜索", exact: true });
+  const dialog = page.getByRole("dialog", { name: "视频搜索", exact: true });
   await dialog.waitFor();
   await field.waitFor();
   assert.equal(await field.evaluate(element => element === document.activeElement), true, "Search input receives initial focus");

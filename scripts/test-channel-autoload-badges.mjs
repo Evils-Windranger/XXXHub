@@ -14,7 +14,7 @@ const nowSec = Math.floor(Date.now() / 1000);
 
 const makeCard = (id, opts = {}) => ({
   id,
-  title: opts.title || `测试短剧 #${id}`,
+  title: opts.title || `测试视频 #${id}`,
   cover: svgCover,
   tags: opts.tags || ["都市", "逆袭"],
   score: opts.score ?? 8.7,
@@ -98,7 +98,7 @@ try {
 
     await page.goto(origin);
     await page.getByRole("button", { name: "分类" }).first().click();
-    await page.getByRole("button", { name: /AI成人短剧/ }).first().click();
+    await page.getByRole("button", { name: /精选频道/ }).first().click();
     await page.locator(".ios-media-grid").waitFor({ state: "visible", timeout: 10000 });
     return { context, page, errors, external };
   };
@@ -112,7 +112,7 @@ try {
       makeCard(104, { title: "过期新片不显示", newAt: nowSec - 80 * 3600, score: 7.9, ep: 18 }),
       ...Array.from({ length: 16 }, (_, i) => makeCard(110 + i, { ep: i + 1, score: 8.0 })),
     ];
-    const p2 = Array.from({ length: 20 }, (_, i) => makeCard(200 + i, { title: `第二页短剧 #${i + 1}` }));
+    const p2 = Array.from({ length: 20 }, (_, i) => makeCard(200 + i, { title: `第二页视频 #${i + 1}` }));
     const { context, page, errors, external } = await openChannel({
       viewport: { width: 390, height: 844 },
       pageData: { 1: p1, 2: p2 },
@@ -141,7 +141,7 @@ try {
       const scroller = Array.from(document.querySelectorAll(".scroll-y")).pop();
       scroller.scrollTop = scroller.scrollHeight;
     });
-    await page.getByText("第二页短剧 #1", { exact: true }).waitFor({ state: "visible", timeout: 5000 });
+    await page.getByText("第二页视频 #1", { exact: true }).waitFor({ state: "visible", timeout: 5000 });
     await page.getByText("— 已经到底啦 —").waitFor({ state: "visible", timeout: 5000 });
     assert.deepEqual(errors, []);
     assert.deepEqual(external, []);
@@ -169,7 +169,7 @@ try {
 
     const fetched = await page.evaluate(() =>
       [...new Set(window.__channelCalls
-        .filter((c) => c.cmd === "api_category" && c.args.cate === "ai-duanju" && c.args.size === 20)
+        .filter((c) => c.cmd === "api_category" && c.args.cate === "featured" && c.args.size === 20)
         .map((c) => c.args.page))]
     );
     assert.deepEqual(fetched, [1, 2, 3], "Auto-load must stop after 2 consecutive fully-filtered pages");

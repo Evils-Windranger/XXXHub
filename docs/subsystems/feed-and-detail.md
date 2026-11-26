@@ -23,16 +23,19 @@ Feed 负责列表播放页的条目位置、详情/帖子读取、标签门、�
   `CommentsPanel`、`EpisodesPanel`、`ArticlePanel`；
   [`src/features/feed/VideoDetailsPanel.tsx`](../../src/features/feed/VideoDetailsPanel.tsx)。
 - [`src/features/posts/Posts.tsx`](../../src/features/posts/Posts.tsx) 的 `PostDetail`：
-  吃瓜详情的正文/播放数据 effect 与线路事件下的后台刷新。
+  图文详情的正文/播放数据 effect 与线路事件下的后台刷新。
+- [`src/features/category/Category.tsx`](../../src/features/category/Category.tsx)：
+  `Category`、`ChannelPage` 与频道能力/声明驱动逻辑。
+- [`src/features/authors/authorDirectory.ts`](../../src/features/authors/authorDirectory.ts)：
+  作者目录加载（`api.popularAuthors`）与关注列表缓存。
 - [`src/shared/model/store.tsx`](../../src/shared/model/store.tsx) 的 `lineEpoch` 和 `accountScope` 传递；
   [`src/shared/model/store.tsx`](../../src/shared/model/store.tsx) 暴露的 `accountGeneration` 与
   [`src/shared/model/accountData.ts`](../../src/shared/model/accountData.ts) 的 `generation`；
   [`src/shared/model/contentPreferences.ts`](../../src/shared/model/contentPreferences.ts) 的 `blockReason`。
 - 后端读取：[`src-tauri/src/api/feed.rs`](../../src-tauri/src/api/feed.rs)、
-  [`src-tauri/src/source/mod.rs`](../../src-tauri/src/source/mod.rs)（外部视频源插件）、
-  [`src-tauri/src/source/mod.rs`](../../src-tauri/src/source/mod.rs)（外部视频源插件）、
   [`src-tauri/src/api/video.rs`](../../src-tauri/src/api/video.rs)、
-  [`src-tauri/src/api/interact.rs`](../../src-tauri/src/api/interact.rs)。
+  [`src-tauri/src/api/interact.rs`](../../src-tauri/src/api/interact.rs)、
+  [`src-tauri/src/authors.rs`](../../src-tauri/src/authors.rs)（全部委托 [`src-tauri/src/source/mod.rs`](../../src-tauri/src/source/mod.rs) 当前激活的视频源插件）。
 
 ## 主运行时路径
 
@@ -59,8 +62,8 @@ Feed 负责列表播放页的条目位置、详情/帖子读取、标签门、�
 7. `requestPlay(id, episode)` 的 key 是
    `` `${accountScope}:${lineEpoch}:${id}:${episode}` ``，最多缓存 12 个 Promise。
    当前集开始播放后，才预取下一集的地址；下一部视频还要先通过详情/标签检查。
-8. 评论面板使用 `api.comments` 或 `api.postComments`（仅短剧开放评论发送，帖子评论只读，
-   不向短剧接口串写），选集使用当前 `detail.episodes`，
+8. 评论面板使用 `api.comments` 或 `api.postComments`（仅视频开放评论发送，帖子评论只读，
+   不向视频评论接口串写），选集使用当前 `detail.episodes`，
    详情面板显示作者/标签/相关推荐。桌面端停靠 `desktop-dock-panel`，移动端使用
    `Sheet`；面板本身不在 Feed 之外维护第二套详情缓存。
 9. 相关推荐只在 `panel === "detail"` 时调用 `api.related`，缓存键是
@@ -103,36 +106,36 @@ Feed 负责列表播放页的条目位置、详情/帖子读取、标签门、�
   或下层 Feed。
 - 手势 overlay 的挂载只取决于条目是否活跃，不取决于 `playUrl` 是否已解析；否则切集
   过渡期的触摸会被列表原生滚动吃掉（2.2.0 反馈的连划跳视频根因）。
-- 标准版「我的」卡片支持电脑右键、手机长按进入多选，继续点按切换选择，并可通过批量栏「全选」选中当前分栏全量记录（含未滚入视口的分页）；收藏页逐项取消收藏，历史页按选中范围调用 `clearHistory()` 或 `removeHistory()` 删除记录。批量操作需确认，切换收藏/历史或短剧/帖子会清空选择；
+- 标准版「我的」卡片支持电脑右键、手机长按进入多选，继续点按切换选择，并可通过批量栏「全选」选中当前分栏全量记录（含未滚入视口的分页）；收藏页逐项取消收藏，历史页按选中范围调用 `clearHistory()` 或 `removeHistory()` 删除记录。批量操作需确认，切换收藏/历史或视频/帖子会清空选择；
   收藏部分失败时保留失败项供重试，未选中的观看记录和收藏互不影响。批量取消收藏在开始时捕获
   `accountGeneration` 与 `actionRevision`；每项请求前后都校验二者，线路/代理事件或组件卸载会使修订号失效，
   随即停止未发送项并抑制旧批次的错误、完成状态与 toast。账号代次检查独立于组件重挂载，避免 cleanup
   执行前队列继续用新账号发起下一项。
-- 分类与原创频道读取（`api_category` / `api_original_videos`）优先解析官网服务端渲染频道页（[`src-tauri/src/source/mod.rs`](../../src-tauri/src/source/mod.rs)（外部视频源插件））：`ai-duanju` / `ai-manju` 对应 `/{cate}/`（`latest`）、`/{cate}/hot/`（`hot`）、`/{cate}/random/`（`random`），`original` 对应 `/original/`（`drama`）、`/original/manju/`（`comic`）、`/original/duanju/`（`short`），按 `section.hg-channel-page .hg-card-grid[data-channel-panel=...]` 严格读取非隐藏面板并还原标签、集数、播放量、评分与角标字段；此外 `api_category` 还将 `newest` / `recommend` 映射至官网列表页 `/newest/`（`/newest/{page}/`）与 `/recommend/`（`/recommend/{page}/`），经 `channel_page::parse_list_page_html` 严格限定在 `section.hg-list-page .hg-card-grid`（并读取 `.hg-page-header__extra` 总数）解析，避免命中页头搜索建议中的 `.hg-drama-card`；分类总览预览行（`page=1 && size < 20`）按 `size` 截断，列表/频道分页保留官网整页卡片防止跳项。任意抓取/解析失败或非预设分类自动回退 JSON 接口（其中 `newest` 回退 `/api/videos?sort=new`，`recommend` 回退 `/api/videos?sort=hot`，避免 `/api/videos/category/{cate}` 返回分类不存在），保持 `Paged<VideoCard>` 契约不变。标准版分类总览页（[`src/features/category/Category.tsx`](../../src/features/category/Category.tsx)）移除移动端重复的「排行榜」单列入口，在桌面与移动端统一以 2×2 半宽卡片网格展示「最近上新」「热门推荐」「专题」「标签」；单列表页（`newest` / `recommend`）的 `ChannelPage` 隐藏排序筛选胶囊并禁用横向切 tab 手势。
-- 频道页与标签结果页的指标排序（`VideoSortMenu` / `sortVideosByMetric`）：原创与 AI 短剧/漫剧频道在分类/排序胶囊行右侧、标签页在「短剧 N」标题行右侧显示排序入口；默认态只显示排序图标，选择后控件变为「指标 + 方向箭头」胶囊（↓ 从多到少、↑ 从少到多），菜单保留「默认排序」项用于恢复；再次点击当前指标会反转方向，菜单保持展开。切换到指标排序时通过 `api_category` / `api_original_videos` 的 `jsonOnly` 选项跳过 SSR（标签页直接使用 `api_tag_videos` 的 JSON 列表），以每页 100 条抓取完整结果（最多 30 页），按列表返回的 `like_count` / `collect_count` / `hot` / `score` 先按所选方向稳定排序（默认降序，再次点击当前指标切为升序），再以 20 条渐进渲染，避免一次插入 DOM 导致长列表重排或内存膨胀；默认排序仍保持原有 SSR/JSON 分页顺序。在原创分类或频道 tab 间切换时保留当前指标，并按新 tab 的完整结果重新排序。指标排序只作用于短剧列表，不影响标签页吃瓜帖。
-- 排行榜热播榜读取（`api_rank("hot")`）优先抓取并解析官网服务端渲染热播榜页 `/ranks/hot/`（[`src-tauri/src/source/mod.rs`](../../src-tauri/src/source/mod.rs)（外部视频源插件） 的 `parse_hot_rank_html` / `fetch_hot_rank`），与官网实时热度 TOP20 口径保持一致；抓取或结构校验失败时自动回退 `/api/ranks/hot`，`recommend` 与 `potential` 继续直连 JSON 接口，保持 `{ type, items: RankItem[] }` 契约不变。
-- 搜索页热搜榜读取（`api_search_hot`，[`src-tauri/src/source/mod.rs`](../../src-tauri/src/source/mod.rs)（外部视频源插件））直接请求干净路径 `{base}/search/`（不带随机防缓存查询参数，与 `channel_page.rs` 及浏览器访问的 CDN 快照保持同源同序），按 DOM 顺序解析 `section.hg-search-hot a.hg-search-hot__item`；前端 [`src/features/search/Search.tsx`](../../src/features/search/Search.tsx) 使用官网样式的单行左右紧凑布局（序号 + 单行省略片名 + 右对齐播放量 + 右箭头），移动端无卡片底色、宽屏（`>= 560px`）保持双列紧凑卡片。
-- 搜索页热门题材/标签读取（`api_hot_tags`，[`src-tauri/src/source/mod.rs`](../../src-tauri/src/source/mod.rs)（外部视频源插件） 的 `parse_hot_tags` / `fetch_hot_tags`）直接请求干净路径 `{base}/`，按 DOM 顺序解析 `section.hg-home-popular-tags a.hg-tagrow__item` 并校验同源 `/tag/{slug}/` 路径；前端 [`src/features/search/SearchTags.tsx`](../../src/features/search/SearchTags.tsx) 严格保留官网热门标签集合与顺序，不混入全量 `/api/tags` 中的非热门标签，屏蔽过滤与每批 12 个「换一批」均只在官网热门集合内生效。
+- 分类与频道列表由当前激活视频源能力及可选声明驱动（[`src/features/category/Category.tsx`](../../src/features/category/Category.tsx)、[`src/tv/BrowsePage.tsx`](../../src/tv/BrowsePage.tsx)）：若 `activeSource.catalog.channels` 声明了频道，按 `ch.kind === "post" ? capabilities.posts : capabilities.catalog.categories` 过滤后渲染（`kind: "post"` 走 `api_post_category`，否则走 `api_category`）；未声明或过滤后为空且 `capabilities.home` 为 `true` 时，回退为默认「推荐发现」频道（`__feed__`，走 `api_feed`）；当 `capabilities.posts` 为 `true` 且未声明帖子频道时追加默认「图文帖子」预览。服务端排序胶囊仅在 `channel.sorts` 非空时展示，具体数据抓取或解析全部由激活源插件的 `category`（或帖子分类 `postCategory` / 首页 `home`）实现，Rust 壳不内置站点 slug 或 CSS 选择器（`api_original_videos` 仅作向后兼容 IPC 保留，当前页面不再调用）。
+- 频道页（非 `__feed__`）与标签结果页支持指标排序（`VideoSortMenu` / `sortVideosByMetric`）：频道页在分类/排序胶囊行右侧、标签页在「视频 N」标题行右侧显示排序入口；默认态只显示排序图标，选择后控件变为「指标 + 方向箭头」胶囊（↓ 从多到少、↑ 从少到多），菜单保留「默认排序」项用于恢复；再次点击当前指标会反转方向，菜单保持展开。切换到指标排序时通过 `api_category` 的 `jsonOnly` 选项交给激活源跳过耗时解析（若源实现区分），以每页 100 条抓取完整结果（最多 30 页），按列表返回的 `like_count` / `collect_count` / `hot` / `score` 先按所选方向稳定排序再以 20 条渐进渲染；在频道 tab 间切换时保留当前指标并按新 tab 重新排序。指标排序只作用于视频列表，不影响标签页图文帖子。
+- 排行榜读取（`api_rank`）直接委托激活源插件的 `rank` 方法，受 `capabilities.catalog.rankings` 门控，保持 `{ type, items: RankItem[] }` 契约不变。
+- 搜索页热搜榜读取（`api_search_hot`）直接委托激活源插件的 `searchHot` 方法；前端 [`src/features/search/Search.tsx`](../../src/features/search/Search.tsx) 使用单行左右紧凑布局（序号 + 单行省略标题 + 右对齐热度文本 + 右箭头），移动端无卡片底色、宽屏（`>= 560px`）保持双列紧凑卡片。
+- 搜索页热门题材/标签读取（`api_hot_tags`）直接委托激活源插件的 `hotTags` 方法，受 `capabilities.catalog.tags` 门控；前端 [`src/features/search/SearchTags.tsx`](../../src/features/search/SearchTags.tsx) 严格保留 `api.hotTags()` 返回集合与顺序，不混入全量 `api.tags()`，屏蔽过滤与每批 `BATCH_SIZE = 10` 个「换一批」均只在该热门集合内生效。
 - 搜索页复位（[`src/features/search/Search.tsx`](../../src/features/search/Search.tsx)）：提交查询后，点底栏当前「搜索」tab 与点输入框右侧 X 等效，统一清空查询与结果、回到热搜/历史态并滚回顶部；底栏触发不重新聚焦输入框，避免大屏单手操作时软键盘再次弹出。
-- 标签短剧列表（`api_tag_videos`）默认向 `/api/videos/tag/{tag}` 显式传 `sort=latest`（仅显式请求 `"hot"` 时用 `sort=hot`），使标准版标签页与 TV 端标签筛选同官网 `/tag/{slug}/` 默认 `latest` 排序保持一致。
-- 标签聚合页（`TagsPage`）顶部提供「置顶标签」板块；长按标签 600ms 切换置顶，再次长按取消，点击仍进入对应标签结果页。置顶项保存到内容偏好 `pinnedTags`（最多 24 个，按最近置顶优先），刷新或重启后保留；普通点按不会误置顶，横向拖动超过 10px 会取消长按。置顶板内的标签只显示名称，不使用高亮边框；分类分组内的已置顶标签保留高亮外框，但不再追加 pin 图标。分类分组经 [`src/features/discover/useNonEmptyTags.ts`](../../src/features/discover/useNonEmptyTags.ts) 仅按服务端显式返回的 `video_count === 0` 同步过滤，不再在挂载后并发探测所有标签，避免仅含吃瓜帖的标签被误删及界面突然大量跳变消失。搜索页热门标签不受影响。
+- 标签视频列表（`api_tag_videos`）向激活源 `tagVideos` 透传 `{ tag, page, size, sort }`（标准版与 TV 端标签页默认按需传 `"latest"`，切换指标或明确请求时按对应方式处理）。
+- 标签聚合页（`TagsPage`）顶部提供「置顶标签」板块；长按标签 600ms 切换置顶，再次长按取消，点击仍进入对应标签结果页。置顶项保存到内容偏好 `pinnedTags`（最多 24 个，按最近置顶优先），刷新或重启后保留；普通点按不会误置顶，横向拖动超过 10px 会取消长按。置顶板内的标签只显示名称，不使用高亮边框；分类分组内的已置顶标签保留高亮外框，但不再追加 pin 图标。分类分组经 [`src/features/discover/useNonEmptyTags.ts`](../../src/features/discover/useNonEmptyTags.ts) 仅按服务端显式返回的 `video_count === 0` 同步过滤，不再在挂载后并发探测所有标签，避免仅含图文帖子的标签被误删及界面突然大量跳变消失。搜索页热门标签不受影响。
 - 标签结果页（`TagPage`）标题栏右侧提供同一置顶开关：pin 占原搜索按钮槽位，与左侧标签图标垂直居中对齐；未置顶和已置顶都使用同款圆形强调底，仅针尖朝向不同（未置顶斜向、置顶后针尖向下）。原搜索图标与页脚搜索入口已移出该页，从首页视频标签、详情页标签等直接进入时也能置顶。
-- 吃瓜频道最新列表（`api_post_category("remen-chigua", page, size, "latest" | "new")`）优先抓取并解析官网服务端渲染吃瓜页 `/blog/gossip/` 与 `/blog/gossip/{page}/`（[`src-tauri/src/source/mod.rs`](../../src-tauri/src/source/mod.rs)（外部视频源插件） 的 `parse_gossip_posts_html` / `fetch_gossip_posts`），与官网 `created_at` 倒序及实时阅读数保持一致，并发请求邻近窗口 `/api/posts/category/remen-chigua` 补全 `tags`、`created_at` 与 `publish_time` 供 `FilteredContent` 标签过滤使用；`Category` 首屏预览（`page=1 && size < 12`）按 `size` 截断，`PostsPage` 分页保留官网整页 12 条防止跨页跳项；抓取或解析失败时自动回退既有 JSON 接口。
-- 分页列表（频道页、吃瓜列表、专题/标签详情、关注/创作者作品与全局/栏目搜索）统一使用 [`src/shared/lib/useAutoLoadMore.ts`](../../src/shared/lib/useAutoLoadMore.ts)（`IntersectionObserver` + 滚动位置检查）在接近底部哨兵时自动加载下一页，正常态不再展示手动「加载更多」按钮；开启标签屏蔽时同样保持上滑自动加载，仅当连续 2 页过滤后均无可见条目（`AUTO_LOAD_EMPTY_PAGE_LIMIT = 2`）才暂停自动续载并显示手动「加载更多」兜底按钮，点击手动加载或调整筛选会重置计数。
-- 视频卡片（[`src/shared/ui/cards.tsx`](../../src/shared/ui/cards.tsx) 的 `WaterfallCard` 与 `RowCard`）在海报左上角按「原创」「热播」「新片」（`new_at` 72 小时窗口）「完结」（`is_finished`）顺序显示角标，与右上角评分保持间距不遮挡；集数状态位于海报底部遮罩左侧（与播放量同排）：完结剧集显示「全 N 集」（N 优先取 `total_episodes`，缺失时回退 `episode_count`），未完结仍显示现有的更新集数文案。「我的」页 `MediaCard` 不再重复显示绿色「已完结」封面标签，每张卡只保留一个左上角角标，并按当前分类切换：「在追剧」中使用蓝色「未看 N 集」，「连载中」中使用「更新至 N 集」，「已完结」中使用「全 N 集」，`全部` 中按完结状态显示「更新至 N 集」或「全 N 集」；观看位置与进度继续由卡片左下角进度行表达。
+- 图文帖子列表（[`src/features/posts/Posts.tsx`](../../src/features/posts/Posts.tsx) 的 `PostsPage`）先调用 `api.postCategories()` 获取可选帖子分类胶囊：未选分类时走 `api.posts()`，选中分类后走 `api.postCategory(route, ...)`；数据抓取与分类列表完全由当前激活视频源插件驱动，客户端不内置站点分类 slug 或网页解析器。
+- 分页列表（频道页、图文列表、专题/标签详情、关注/创作者作品与全局/栏目搜索）统一使用 [`src/shared/lib/useAutoLoadMore.ts`](../../src/shared/lib/useAutoLoadMore.ts)（`IntersectionObserver` + 滚动位置检查）在接近底部哨兵时自动加载下一页，正常态不再展示手动「加载更多」按钮；开启标签屏蔽时同样保持上滑自动加载，仅当连续 2 页过滤后均无可见条目（`AUTO_LOAD_EMPTY_PAGE_LIMIT = 2`）才暂停自动续载并显示手动「加载更多」兜底按钮，点击手动加载或调整筛选会重置计数。
+- 视频卡片（[`src/shared/ui/cards.tsx`](../../src/shared/ui/cards.tsx) 的 `WaterfallCard` 与 `RowCard`）在海报左上角按「原创」「热播」「新片」（`new_at` 72 小时窗口）「完结」（`is_finished`）顺序显示角标，与右上角评分保持间距不遮挡；集数状态位于海报底部遮罩左侧（与播放量同排）：完结视频显示「全 N 集」（N 优先取 `total_episodes`，缺失时回退 `episode_count`），未完结仍显示现有的更新集数文案。「我的」页 `MediaCard` 不再重复显示绿色「已完结」封面标签，每张卡只保留一个左上角角标，并按当前分类切换：「未看完」中使用蓝色「未看 N 集」，「连载中」中使用「更新至 N 集」，「已完结」中使用「全 N 集」，`全部` 中按完结状态显示「更新至 N 集」或「全 N 集」；观看位置与进度继续由卡片左下角进度行表达。
 - 标准版「我的」收藏与观看历史保持原有网格列数；滚动容器接近底部哨兵（提前 300px）时
   每次扩展 12 项，不再显示「加载更多」按钮。
-- 标准版「我的 → 收藏 → 短剧」默认显示全部收藏并保持收藏顺序（按添加顺序）；右上角单个筛选图标展开「追剧状态」菜单，提供「在追剧」「连载中」「已完结」三个可以重叠的分类：`在追剧` 显示所有 `最新集数 - 已看到集数 > 0` 的收藏，不管它已完结还是连载中（例如 10 集完结剧看到第 2 集即显示「未看 8 集」，从未看过则从第 1 集起算）；`连载中` 显示所有未完结收藏，即使其中还有未看集数；`已完结` 显示所有已完结收藏。三者均按 `updated_at`/`last_ep_at`/`created_at` 的最新更新时间倒序，时间相同按原收藏顺序稳定排序；选择分类后菜单收起，筛选胶囊内显示当前分类与数量；再次点击胶囊只收起/展开菜单，不回退筛选。要回到默认「我的收藏 / 短剧 / 全部收藏」，再次点击底部「我的」导航（与搜索 tab 的复位手势一致），同时回到页面顶部。「短剧 N」「帖子 N」显示该类型收藏总数，菜单中的「在追剧 N」「连载中 N」「已完结 N」显示当前分类计数（同一部可同时计入在追剧与连载中/已完结），底部「已显示 X / Y 项本机记录」的 Y 跟随当前分类结果，因此与对应计数一致。进入收藏短剧页后按每批最多 6 部渐进补齐全部收藏详情以统计分类，未知详情不会被猜成未完结、已完结或在追剧；默认态详情加载失败时提示分类计数可能不完整，筛选态则提示筛选结果可能不完整。播放列表随之按当前筛选顺序传给 Feed；同一激活期间已刷新的条目不重复请求，旧卡片与观看断点保留，刷新失败不将旧集数当空数据，离开页面或切线后丢弃在途结果。
-- 吃瓜详情（[`src/features/posts/Posts.tsx`](../../src/features/posts/Posts.tsx) 的
+- 标准版「我的 → 收藏 → 视频」默认显示全部收藏并保持收藏顺序（按添加顺序）；右上角单个筛选图标展开「观看状态」菜单，提供「未看完」「连载中」「已完结」三个可以重叠的分类：`未看完` 显示所有 `最新集数 - 已看到集数 > 0` 的收藏，不管它已完结还是连载中（例如 10 集完结视频看到第 2 集即显示「未看 8 集」，从未看过则从第 1 集起算）；`连载中` 显示所有未完结收藏，即使其中还有未看集数；`已完结` 显示所有已完结收藏。三者均按 `updated_at`/`last_ep_at`/`created_at` 的最新更新时间倒序，时间相同按原收藏顺序稳定排序；选择分类后菜单收起，筛选胶囊内显示当前分类与数量；再次点击胶囊只收起/展开菜单，不回退筛选。要回到默认「我的收藏 / 视频 / 全部收藏」，再次点击底部「我的」导航（与搜索 tab 的复位手势一致），同时回到页面顶部。「视频 N」「帖子 N」显示该类型收藏总数，菜单中的「未看完 N」「连载中 N」「已完结 N」显示当前分类计数（同一部可同时计入未看完与连载中/已完结），底部「已显示 X / Y 项本机记录」的 Y 跟随当前分类结果，因此与对应计数一致。进入收藏视频页后按每批最多 6 部渐进补齐全部收藏详情以统计分类，未知详情不会被猜成未完结、已完结或未看完；默认态详情加载失败时提示分类计数可能不完整，筛选态则提示筛选结果可能不完整。播放列表随之按当前筛选顺序传给 Feed；同一激活期间已刷新的条目不重复请求，旧卡片与观看断点保留，刷新失败不将旧集数当空数据，离开页面或切线后丢弃在途结果。
+- 图文详情（[`src/features/posts/Posts.tsx`](../../src/features/posts/Posts.tsx) 的
   `PostDetail`）区分「换帖子/账号」与「仅线路代次变化」：`hg:line-changed`/`hg:proxy-changed`
   （自动选线切换、保存代理）推进 `lineEpoch` 时，只有 `id`/`accountScope` 变化才清空重置；
   仅 `lineEpoch` 变化保留已显示的 `post`、正文与滚动位置，后台重拉 `api_post` 与
   `api_post_playback`，播放地址解析失败保留旧地址不清空。否则整页回加载态会卸载播放器
   portal，视频从 0 重播（issue #165）。
-- 吃瓜详情的正文仅在正文内容或安全模式改变时重新清洗。渲染时复用同一个
+- 图文详情的正文仅在正文内容或安全模式改变时重新清洗。渲染时复用同一个
   `dangerouslySetInnerHTML` 属性对象；滚动更新「阅读进度」以及刷新得到同一正文时不替换
   图片节点，避免懒加载图片反复消失、重载和撑开布局（issue #165）。
-- 吃瓜正文链接拦截（[`src/shared/lib/html.ts`](../../src/shared/lib/html.ts) 的 `handleArticleClick` / `parseInternalVideoId`、`PostDetail` 与 `ArticlePanel`）：`store.tsx` 启动/切线读取 `boot().base` 后同步 `setSiteOrigin`，点击正文 `<a>` 时仅对主站或当前激活线路同源的 `/video/{id}/` 链接入栈站内 `feed` 播放页，其余外链与非规范路径仍交 `api.openUrl` 打开（失败回退剪贴板）。
+- 图文正文链接拦截（[`src/shared/lib/html.ts`](../../src/shared/lib/html.ts) 的 `handleArticleClick` / `parseInternalVideoId` / `normalizeInternalVideoUri`、`PostDetail` 与 `ArticlePanel`）：`store.tsx` 启动/切线读取 `boot().base` 后同步 `setSiteOrigin`，点击正文 `<a>` 时仅放行并入栈站内 `feed` 播放页的内部链接（统一格式 `hg://video/{id}`，或匹配当前源声明的 `activeSource.links.videoIdPathPattern` 且命中 `activeSiteOrigin` / `activeSource.origins` 同源校验），其余外链与非规范路径仍交 `api.openUrl` 打开（失败回退剪贴板）。
 - 播放页状态提示（上下划切集、剧集边界、上下划切集开关、屏幕锁定/解锁、双击暂停的当前集提示）统一带 `tag="playback-hint"`（`Feed.tsx`、`FeedPlayerShellChrome.tsx`、`useFeedTouchGestures.ts` 与 `useFeedViewport.ts`）；`store.tsx` 的
   `pushToastItem` 对同 tag 原地替换内容并重置 2200ms 计时，快速连续操作只显示一张最新卡片，
   不堆叠、不重放入场动画；双击暂停的当前集提示使用 `showStickyToast` 的零时长槽，由 `dismissToast` 在暂停图标消失时同步收起；无 tag 的普通 toast 仍按原逻辑堆叠（最多 3 张）。同剧同作用域（`permissionKey` 不变）切集过渡期内，
@@ -156,7 +159,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib
 fixture 位于 `scripts/test-account-sync-empty-state.mjs`；需要单独运行时可执行
 `node scripts/test-account-sync-empty-state.mjs`。浏览器 fixture 使用 mock Tauri IPC 且阻断外部请求，
 不能证明真实上游的正文结构或账号接口；真实接口变化需要另加网络隔离的 fixture 或手动验证。
-`test:post-flicker` 是吃瓜详情线路/代理事件的回归（issue #165）：浏览器 fixture，
+`test:post-flicker` 是图文详情线路/代理事件的回归（issue #165）：浏览器 fixture，
 mock IPC，本地 ffmpeg HLS 分片，不访问上游；需要 ffmpeg，归入播放诊断
 （`pnpm test:playback --scenarios post-flicker`，CI 的 core 分片），不进 smoke。
 账号切换 fixture 会挂起第一项取消收藏请求，切换账号后再释放，并检查没有发送第二项、没有向新账号

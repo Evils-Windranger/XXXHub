@@ -1,8 +1,8 @@
-.PHONY: check test-rust test-web test-tv test-smoke i18n docs budget release-check
+.PHONY: check test-rust test-web test-tv test-smoke i18n docs budget release-check purity
 
 # The verification of record is GitHub Actions. These targets are the same
 # commands CI runs, so a local run (when requested) and CI cannot drift.
-check: test-rust test-web i18n docs budget release-check
+check: test-rust test-web i18n docs budget release-check purity
 
 test-rust:
 	cargo check --manifest-path src-tauri/Cargo.toml --all-targets
@@ -29,3 +29,6 @@ docs:
 
 release-check:
 	node scripts/check-version-sync.mjs
+
+purity:
+	node scripts/check-shell-purity.mjs

@@ -1,4 +1,4 @@
-import { handleArticleClick, sanitizeHtml, setStrictSecurity } from "../src/shared/lib/html";
+import { handleArticleClick, sanitizeHtml, setSiteOrigin, setStrictSecurity } from "../src/shared/lib/html";
 import DOMPurify from "dompurify";
 
 const fixture = document.querySelector<HTMLDivElement>("#fixture")!;
@@ -6,6 +6,7 @@ const results: { name: string; passed: boolean; error?: string }[] = [];
 const assert = (value: unknown, message: string) => { if (!value) throw new Error(message); };
 const marker = "window.__hghubxAudit = 1;void(0)";
 setStrictSecurity(true);
+setSiteOrigin("https://fixture.invalid");
 
 async function test(name: string, run: () => void | Promise<void>) {
   try { await run(); results.push({ name, passed: true }); }
@@ -50,7 +51,7 @@ await test("formatting and lazy image survive", () => {
   assert(fixture.querySelector("strong")?.textContent === "正文", "formatting lost");
   const img = fixture.querySelector("img");
   assert(img?.getAttribute("src")?.includes("/img?u="), "image not proxied");
-  assert(decodeURIComponent(img!.getAttribute("src")!).endsWith("https://huangguoai.com/cover.jpg"), "wrong image URL");
+  assert(decodeURIComponent(img!.getAttribute("src")!).endsWith("https://fixture.invalid/cover.jpg"), "wrong image URL");
   assert(img?.alt === "封面" && !img.hasAttribute("data-src"), "image attributes incorrect");
 });
 
@@ -69,7 +70,7 @@ await test("ordered list starting number survives both sanitizer passes", () => 
 await test("safe links cannot retain opener", () => {
   fixture.innerHTML = sanitizeHtml('<a href="/video/123" target="_self" rel="opener">link</a>');
   const a = fixture.querySelector("a")!;
-  assert(a.href === "https://huangguoai.com/video/123", "relative link broken");
+  assert(a.href === "https://fixture.invalid/video/123", "relative link broken");
   assert(a.target === "_blank" && a.rel === "noopener noreferrer", "unsafe link navigation");
 });
 
@@ -82,7 +83,7 @@ await test("internal and private links or spoofed proxy images are rejected in s
   setStrictSecurity(true);
   fixture.innerHTML = sanitizeHtml(
     '<a href="http://tauri.localhost/tests/html-security.html">t</a>' +
-    '<a href="http://hg.localhost/img?u=https://huangguoai.com/a.jpg">h</a>' +
+    '<a href="http://hg.localhost/img?u=https://fixture.invalid/a.jpg">h</a>' +
     '<a href="http://127.0.0.1:1420/">l</a>' +
     '<img src="http://hg.localhost/img?u=http%3A%2F%2F127.0.0.1%2Fsecret.jpg">'
   );
@@ -98,7 +99,7 @@ await test("sanitizeHtml is idempotent and intercepts link clicks", () => {
   fixture.addEventListener("click", (e) => handleArticleClick(e, (u) => { opened = u; }), { once: true });
   const ev = new MouseEvent("click", { bubbles: true, cancelable: true });
   fixture.querySelector("a")!.dispatchEvent(ev);
-  assert(ev.defaultPrevented && opened === "https://huangguoai.com/video/123", "link click not intercepted safely");
+  assert(ev.defaultPrevented && opened === "https://fixture.invalid/video/123", "link click not intercepted safely");
 });
 
 await test("relaxed mode fallback keeps XSS protection while relaxing strict host/style rules", () => {

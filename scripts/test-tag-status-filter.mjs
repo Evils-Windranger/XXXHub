@@ -98,7 +98,7 @@ try {
   await openStatus();
   assert.deepEqual(await page.locator('[role="menuitemradio"]').allInnerTexts(), ["全部\n3", "连载中\n1", "已完结\n2"]);
   await page.screenshot({ path: fileURLToPath(new URL("tag-status-menu.png", output)), animations: "disabled" });
-  report.checks.push("tag page: clicking 短剧 N opens 全部 / 连载中 / 已完结 with full-result counts");
+  report.checks.push("tag page: clicking 视频 N opens 全部 / 连载中 / 已完结 with full-result counts");
 
   await selectStatus("finished");
   await waitOrder(["丙", "甲"]);
@@ -124,7 +124,7 @@ try {
   await waitOrder(titles);
   await selectSort("默认排序");
   await waitOrder(titles);
-  assert.equal((await trigger().innerText()).trim(), "短剧\n3");
+  assert.equal((await trigger().innerText()).trim(), "视频\n3");
   await openStatus();
   assert.deepEqual(await page.locator('[role="menuitemradio"]').allInnerTexts(), ["全部\n3", "连载中\n1", "已完结\n2"]);
   await page.screenshot({ path: fileURLToPath(new URL("tag-status-default-menu.png", output)), animations: "disabled" });

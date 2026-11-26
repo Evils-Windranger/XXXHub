@@ -41,7 +41,7 @@ try {
 
   const searchNav = page.locator(".hg-tabbar .ios-mobile-nav-item").filter({ hasText: "搜索" });
   await searchNav.click();
-  const input = page.getByRole("textbox", { name: "搜索短剧、帖子、题材…" });
+  const input = page.getByRole("textbox", { name: "搜索视频、帖子、题材…" });
   await input.waitFor();
   assert.equal(await searchNav.getAttribute("aria-current"), "page");
   report.checks.push("bottom nav opens the Search tab");
@@ -57,7 +57,7 @@ try {
 
   await searchNav.click();
   await page.waitForFunction(() => {
-    const field = document.querySelector('input[aria-label="搜索短剧、帖子、题材…"]');
+    const field = document.querySelector('input[aria-label="搜索视频、帖子、题材…"]');
     return field instanceof HTMLInputElement && field.value === "";
   });
   assert.equal(await segmented.count(), 0, "query result type switch must be removed");
@@ -72,7 +72,7 @@ try {
   await segmented.waitFor();
   await page.locator('[aria-label="清空搜索"]').click();
   await page.waitForFunction(() => {
-    const field = document.querySelector('input[aria-label="搜索短剧、帖子、题材…"]');
+    const field = document.querySelector('input[aria-label="搜索视频、帖子、题材…"]');
     return field instanceof HTMLInputElement && field.value === "";
   });
   assert.equal(await segmented.count(), 0, "clear button must still reset the search");

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { AppProvider } from "../src/shared/model/store";
 import FeedItemChrome from "../src/features/feed/FeedItemChrome";
 import { FeedMobileTopTools, FeedPlayerShellChrome } from "../src/features/feed/FeedPlayerShellChrome";
 import { PlaybackSettingsPanel } from "../src/features/feed/PlaybackSettingsPanel";
@@ -95,7 +96,7 @@ function Probe() {
     <FeedMobileTopTools
       isDesktop={false} controlsLocked={false} active fs={fsPreview} idle={fsIdle} rotated={false} clean={clean}
       currentQuality={preferHevc ? "HD" : "SD"}
-      searchLabel={contextSearch ? "搜短剧" : undefined}
+      searchLabel={contextSearch ? "搜视频" : undefined}
       onSearch={contextSearch ? () => setOpenedTag("search") : undefined}
     />
     {fsPreview && <FeedPlayerShellChrome
@@ -161,4 +162,45 @@ function Probe() {
   </div>;
 }
 
-createRoot(document.querySelector("#root")!).render(<Probe />);
+if (!(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) {
+  Object.assign(window, {
+    __TAURI_INTERNALS__: {
+      invoke: async (cmd: string) => {
+        if (cmd === "app_boot") return { user: null, logged_in: false, strict_security: true, base: "https://fixture.invalid" };
+        if (cmd === "source_state") {
+          return {
+            activeSourceId: "fixture-source",
+            allowUntrusted: true,
+            sources: [{
+              id: "fixture-source",
+              name: "Fixture Source",
+              version: "1.0.0",
+              description: "Home controls fixture",
+              author: "Fixture",
+              apiVersion: "1",
+              runtimeKind: "quickjs",
+              origins: ["https://fixture.invalid"],
+              capabilities: {
+                home: true,
+                search: true,
+                catalog: { categories: true, tags: true, rankings: true, authors: true },
+                detail: { episodes: true, related: true, comments: true },
+                playback: { hls: true, mp4: true, subtitles: true },
+                posts: true,
+                account: true,
+                lines: true,
+              },
+              updateUrls: [],
+              signature: { status: "unsigned", keyId: "", fingerprint: "" },
+              installedAt: 0,
+              active: true,
+            }],
+          };
+        }
+        return null;
+      },
+    },
+  });
+}
+
+createRoot(document.querySelector("#root")!).render(<AppProvider><Probe /></AppProvider>);

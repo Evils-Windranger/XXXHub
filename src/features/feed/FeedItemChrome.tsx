@@ -3,7 +3,7 @@ import { Button } from "../../shared/ui/ios/controls";
 import { Loader } from "../../shared/ui/ios/effects";
 import { fmt, fmtTime } from "../../shared/api/api";
 import type { Post } from "../../shared/api/types";
-import type { Toast } from "../../shared/model/store";
+import { useStore, type Toast } from "../../shared/model/store";
 import { PlaybackProgress, playbackLockRightInset, type PlaybackClock } from "../playback";
 import {
   IBack, IChevR, IChevronDown, IChevronUp, IComment, IExpand, IFileText,
@@ -98,6 +98,7 @@ export default function FeedItemChrome({
   muted, onToggleMuted, swipeEnabled, swipeEp, onToggleSwipe, onLock,
   onBarDown, onBarMove, onBarUp, onRetryStream, toast,
 }: Props) {
+  const { capabilities } = useStore();
   const episodes = meta.episodes;
   const activePct = barPct ?? (scrub ? scrub.pct / 100 : null);
   const scrubbing = isActive && activePct !== null;
@@ -173,10 +174,12 @@ export default function FeedItemChrome({
             {collected ? <IStarF size={27} className="hg-gold" /> : <IStar size={27} className="hg-ink hg-ov-shadow" />}
             <span className="text-[12px] text-white/90 tabular-nums">{fmt(collectCount)}</span>
           </Button>
-          <Button onClick={() => setPanel("comments")} className="mobile-action-comments flex flex-col items-center gap-1 pressable" aria-label={tr("评论 {0} 条", fmt(meta.comment))}>
-            <IComment size={27} className="hg-ink hg-ov-shadow" />
-            <span className="text-[12px] text-white/90 tabular-nums">{fmt(meta.comment)}</span>
-          </Button>
+          {capabilities.detail.comments && (
+            <Button onClick={() => setPanel("comments")} className="mobile-action-comments flex flex-col items-center gap-1 pressable" aria-label={tr("评论 {0} 条", fmt(meta.comment))}>
+              <IComment size={27} className="hg-ink hg-ov-shadow" />
+              <span className="text-[12px] text-white/90 tabular-nums">{fmt(meta.comment)}</span>
+            </Button>
+          )}
           <Button onClick={() => setPanel("more")} className="mobile-action-more flex flex-col items-center gap-1 pressable" aria-label={tr("更多播放设置")}>
             <IMore size={26} className="hg-ink hg-ov-shadow" />
             <span className="text-[12px] hg-ink-2 hg-ov-shadow">{tr("更多")}</span>
@@ -204,17 +207,19 @@ export default function FeedItemChrome({
             <span className="text-[12px] text-white/90 tabular-nums">{fmt(likeCount)}</span>
           </Button>
 
-          <Button onClick={() => setPanel("comments")} aria-label={tr("评论 {0} 条", fmt(meta.comment))} className="flex flex-col items-center gap-1 pressable">
-            <IComment size={27} className="text-white tsh" />
-            <span className="text-[12px] text-white/90 tabular-nums">{fmt(meta.comment)}</span>
-          </Button>
+          {capabilities.detail.comments && (
+            <Button onClick={() => setPanel("comments")} aria-label={tr("评论 {0} 条", fmt(meta.comment))} className="flex flex-col items-center gap-1 pressable">
+              <IComment size={27} className="text-white tsh" />
+              <span className="text-[12px] text-white/90 tabular-nums">{fmt(meta.comment)}</span>
+            </Button>
+          )}
 
           <Button onClick={() => void onFav()} disabled={collectPending} aria-busy={collectPending} aria-label={tr("收藏")} className="flex flex-col items-center gap-1 pressable" aria-pressed={collected}>
             {collected ? <IStarF size={27} className="hg-gold" /> : <IStar size={27} className="hg-ink hg-ov-shadow" />}
             <span className="text-[12px] text-white/90 tabular-nums">{fmt(collectCount)}</span>
           </Button>
 
-          {kind === "video" && (
+          {kind === "video" && capabilities.detail.episodes && (
             <Button onClick={() => setPanel("episodes")} aria-label={tr("选集")} className="flex flex-col items-center gap-1 pressable">
               <IList size={26} className="text-white tsh" />
               <span className="text-[12px] text-white/90">{tr("选集")}</span>
@@ -227,7 +232,7 @@ export default function FeedItemChrome({
       {!fs && !clean && isDesktop && (
         <div className="desktop-video-meta">
           <div className="flex items-center gap-2">
-            <span className="text-[16px] font-bold text-white tsh truncate">@{meta.author}</span>
+            {!!meta.author && <span className="text-[16px] font-bold text-white tsh truncate">@{meta.author}</span>}
             {episodes.length > 0 && (
               <span className="shrink-0 px-1.5 py-px rounded-md text-[12px] font-bold text-white"
                 style={{ background: "rgba(255,255,255,.16)" }}>{tr("第 {0}/{1} 集", curEp, episodes.length)}</span>
@@ -311,8 +316,10 @@ export default function FeedItemChrome({
               )}
             </div>}
             {!clean && <div className={mode === "home" && kind === "video" ? "mobile-playback-dock mobile-playback-dock-home" : "mobile-playback-dock"}>
-              {kind === "video" ? <Button aria-label={episodes.length ? tr("选集，共 {0} 集", episodes.length) : tr("选集")} onClick={() => setPanel("episodes")} className="mobile-playback-episodes">
+              {kind === "video" && capabilities.detail.episodes ? <Button aria-label={episodes.length ? tr("选集，共 {0} 集", episodes.length) : tr("选集")} onClick={() => setPanel("episodes")} className="mobile-playback-episodes">
                 <IList size={18} /><span>{tr("选集{0}", episodes.length > 0 ? tr(" · 全{0}集", episodes.length) : "")}</span><IChevronUp size={16} />
+              </Button> : kind === "video" ? <Button aria-label={tr("视频详情")} onClick={() => setPanel("detail")} className="mobile-playback-episodes">
+                <IFileText size={18} /><span>{tr("详情与标签")}</span><IChevronUp size={16} />
               </Button> : <Button aria-label={tr("图文详情")} onClick={() => setPanel("detail")} className="mobile-playback-episodes">
                 <IFileText size={18} /><span>{tr("图文详情")}</span><IChevronUp size={16} />
               </Button>}
@@ -320,7 +327,7 @@ export default function FeedItemChrome({
                 className="mobile-playback-quick">
                 {muted ? <IVolMute size={18} /> : <IVol size={18} />}
               </Button>
-              {swipeEnabled && <Button onClick={onToggleSwipe} aria-label={swipeEp ? tr("关闭上下划切集") : tr("开启上下划切集")} aria-pressed={swipeEp}
+              {swipeEnabled && capabilities.detail.episodes && <Button onClick={onToggleSwipe} aria-label={swipeEp ? tr("关闭上下划切集") : tr("开启上下划切集")} aria-pressed={swipeEp}
                 className={`mobile-playback-quick ${swipeEp ? "is-on" : ""}`}>
                 <IVertSwap size={18} />
               </Button>}

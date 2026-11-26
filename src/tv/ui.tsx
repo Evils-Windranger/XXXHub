@@ -9,9 +9,9 @@ export function TvCard({ content, onOpen, placeholder = false }: { content: TvCo
   const blocked = blockReason(content.tags);
   if (blocked && !placeholder) return null;
   return <button className={`tv-card ${content.kind === "post" ? "tv-card-wide" : ""}`} data-tv-focus={contentKey(content)} onClick={() => onOpen(content)} aria-label={blocked ? "已屏蔽的内容" : content.title}>
-    <div className="tv-card-art">{blocked ? <span className="tv-neutral">已屏蔽</span> : content.cover ? <img src={cover(content.cover)} alt="" loading="lazy" /> : <span className="tv-neutral">HGhubX</span>}
+    <div className="tv-card-art">{blocked ? <span className="tv-neutral">已屏蔽</span> : content.cover ? <img src={cover(content.cover)} alt="" loading="lazy" /> : <span className="tv-neutral">暂无封面</span>}
       {!blocked && !!content.score && <span className="tv-score">{content.score.toFixed(1)}</span>}</div>
-    <strong>{blocked ? "已屏蔽的内容" : content.title}</strong><small>{blocked ? "记录已保留" : content.kind === "post" ? "吃瓜视频" : content.episodeCount ? `${content.episodeCount} 集` : "查看详情"}</small>
+    <strong>{blocked ? "已屏蔽的内容" : content.title}</strong><small>{blocked ? "记录已保留" : content.kind === "post" ? "帖子" : content.episodeCount ? `${content.episodeCount} 集` : "查看详情"}</small>
   </button>;
 }
 export function TvModal({ id, title, onClose, children }: { id: string; title: string; onClose: () => void; children: ReactNode }) {

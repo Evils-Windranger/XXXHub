@@ -33,16 +33,54 @@ export function installFixture({ theme, titles, metrics = [], metricPages = 1, m
     hasHardwareBack() { return backChannels.size > 0; },
   };
   window.__AUTHOR_DIRECTORY_CALLS__ = () => authorDirectoryCalls;
+  window.__TAURI_EVENT_PLUGIN_INTERNALS__ ??= { unregisterListener() {} };
   window.__TAURI_INTERNALS__ = {
     metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
     transformCallback(callback) { const id = ++nextCallback; callbacks.set(id, callback); return id; },
     unregisterCallback(id) { callbacks.delete(id); },
     async invoke(command, args = {}) {
       if (command === "app_boot") return { user: null, logged_in: false, strict_security: true, base: "https://fixture.invalid" };
+      if (command === "source_state") return {
+        activeSourceId: "fixture-source",
+        allowUntrusted: true,
+        sources: [{
+          id: "fixture-source",
+          name: "Fixture Source",
+          version: "1.0.0",
+          description: "UI fixture source",
+          author: "Fixture",
+          apiVersion: "1",
+          runtimeKind: "quickjs",
+          origins: ["https://fixture.invalid"],
+          capabilities: {
+            home: true,
+            search: true,
+            catalog: { categories: true, tags: true, rankings: true, authors: true },
+            detail: { episodes: true, related: true, comments: true },
+            playback: { hls: true, mp4: true, subtitles: true },
+            posts: true,
+            account: true,
+            lines: true,
+          },
+          catalog: {
+            channels: [
+              { id: "featured", label: "精选频道", sorts: ["latest", "hot_window", "random"] },
+              { id: "archive", label: "片库频道", sorts: ["latest", "hot_window", "random"] },
+              { id: "special", label: "专题频道", sorts: ["全部专题", "热门专题", "最新专题"] },
+            ],
+          },
+          updateUrls: [],
+          signature: { status: "unsigned", keyId: "", fingerprint: "" },
+          installedAt: 0,
+          active: true,
+        }],
+      };
       if (command === "playback_log_status") return { enabled: false, path: null, error: null };
       if (command === "line_auto") return { base: "https://fixture.invalid", previous: "https://fixture.invalid", switched: false, pick: { tier: "main", ms: 1, reason: "fixture", candidates: [] } };
       if (command === "api_feed") {
-        if (args.size !== 100) return paged([]);
+        return args.size === 100 ? metricPaged(args.page || 1) : paged([]);
+      }
+      if (command === "api_popular_authors") {
         authorDirectoryCalls += 1;
         const names = [
           "都市阿城", "古风小满", "悬疑老K", "甜宠七月", "逆袭阿岚", "校园小北", "职场安姐", "奇幻阿泽",
@@ -52,33 +90,31 @@ export function installFixture({ theme, titles, metrics = [], metricPages = 1, m
           "仙侠阿海", "现代阿山", "脑洞阿云",
         ];
         const page = Math.max(1, Number(args.page) || 1);
-        const size = 100;
-        const total = 1892;
-        const pages = Math.ceil(total / size);
-        const start = (page - 1) * size;
-        const count = Math.max(0, Math.min(size, total - start));
-        const items = Array.from({ length: count }, (_, offset) => {
+        const pageSize = 20;
+        const total = names.length;
+        const pages = Math.ceil(total / pageSize);
+        const start = (page - 1) * pageSize;
+        const items = names.slice(start, start + pageSize).map((name, offset) => {
           const index = start + offset;
-          const authorIndex = index % names.length;
           return {
-            ...cards[index % cards.length],
-            id: 10_000 + index,
-            title: `作者目录视频 ${index + 1}`,
-            author: { id: 100 + authorIndex, name: names[authorIndex], avatar: "" },
+            id: 100 + index,
+            name,
+            avatar: "",
+            followers: 1500000 - index * 25000,
           };
         });
-        return { items, pagination: { page, pages, size, total } };
+        return { items, pagination: { page, pages, size: pageSize, total }, supported: true };
       }
       if (["api_category", "api_original_videos", "api_search", "api_posts", "api_post_category", "api_tag_videos"].includes(command)) {
         return args.size === 100 ? metricPaged(args.page || 1) : paged(cards);
       }
+      if (command === "api_post_categories") return { items: [] };
       if (command === "api_topics") return paged([topic]);
       if (command === "api_topic") return { topic, videos: paged(cards), related: [] };
       if (command === "api_tags") return { categories: tagGroups ?? [{ name: "题材", tags: [{ id: 1, name: "都市", slug: "city" }] }] };
       if (command === "api_hot_tags") return { items: [{ name: "都市", slug: "dushi" }] };
       if (command === "api_user") return { id: args.id, username: `author-${args.id}`, nickname: "示例作者", avatar: "", counts: {} };
       if (command === "api_user_stats") {
-        if (args.id >= 100 && args.id < 135) authorDirectoryCalls += 1;
         return {
           user_id: args.id, like_count: 178000, following: 0,
           followers: args.id >= 100 && args.id < 160 ? 1500000 - (args.id - 100) * 25000 : 1157,

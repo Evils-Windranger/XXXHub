@@ -274,7 +274,7 @@ textarea:focus{{border-color:#26c6da}}
     <button class="btn-s" type="button" onclick="document.getElementById('f').click()">文件</button>
     <input id="f" type="file" accept=".json,.hgsrc,.txt" hidden>
   </div>
-  <textarea id="t" placeholder="链接 / npm:包名 / JSON" autofocus></textarea>
+  <textarea id="t" placeholder="链接 / hghubx-src:// 口令 / JSON" autofocus></textarea>
   <button id="go" class="go" type="button">推送</button>
   <p id="msg"></p>
 </div>

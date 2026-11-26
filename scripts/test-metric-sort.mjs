@@ -88,8 +88,8 @@ try {
     assert.equal(await page.getByRole("menu").count(), 0);
   };
 
-  // Original channel: category pill row plus the metric sorter at the far right.
-  await page.goto(new URL("/tests/channel-swipe.html?cate=original", origin).href, { waitUntil: "networkidle" });
+  // Special channel: category pill row plus the metric sorter at the far right.
+  await page.goto(new URL("/tests/channel-swipe.html?cate=special", origin).href, { waitUntil: "networkidle" });
   await page.locator(".ios-page > .scroll-y").waitFor();
   await page.locator("[data-video-sort-trigger]").waitFor();
   await waitOrder(expected.默认排序);
@@ -111,18 +111,18 @@ try {
       assert.equal(await page.getByRole("menu", { name: "排序方式" }).count(), 1);
       await page.screenshot({ path: fileURLToPath(new URL("channel-like-asc.png", output)), animations: "disabled" });
       await page.keyboard.press("Escape");
-      await page.getByRole("button", { name: "原创漫剧", exact: true }).click();
+      await page.getByRole("button", { name: "热门专题", exact: true }).click();
       await waitOrder(expectedAsc.点赞数);
       assert.equal(await page.locator("[data-video-sort-trigger]").getAttribute("data-sort-direction"), "asc");
-      report.checks.push("original channel: clicking the selected metric flips the arrow and keeps the menu open; switching tab keeps metric and direction");
-      await page.getByRole("button", { name: "全部原创", exact: true }).click();
+      report.checks.push("special channel: clicking the selected metric flips the arrow and keeps the menu open; switching tab keeps metric and direction");
+      await page.getByRole("button", { name: "全部专题", exact: true }).click();
       await waitOrder(expectedAsc.点赞数);
     }
   }
   await resetSort();
-  report.checks.push("original channel: all four metrics reorder globally; active pill is labeled; default menu item resets the order");
+  report.checks.push("special channel: all four metrics reorder globally; active pill is labeled; default menu item resets the order");
 
-  // Tag results: the sorter sits on the "短剧 N" heading row and only changes videos.
+  // Tag results: the sorter sits on the "视频 N" heading row and only changes videos.
   await page.goto(new URL("/tests/tag-metric-sort.html?tag=悬疑", origin).href, { waitUntil: "networkidle" });
   await page.locator("[data-video-sort-trigger]").waitFor();
   await waitOrder(expected.默认排序);
@@ -144,7 +144,7 @@ try {
   assert.equal(await page.locator("[data-video-sort-trigger]").getAttribute("data-sort-direction"), "asc");
   await page.keyboard.press("Escape");
   await resetSort();
-  report.checks.push("tag page: sorter is on the short-drama heading row; all four metrics reorder the video list and toggle direction");
+  report.checks.push("tag page: sorter is on the video heading row; all four metrics reorder the video list and toggle direction");
 
   // Menu keyboard path: Escape closes and returns focus to the trigger.
   await page.locator("[data-video-sort-trigger]").focus();

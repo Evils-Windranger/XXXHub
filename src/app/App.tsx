@@ -10,7 +10,7 @@ import { exitDocumentFullscreen, getFullscreenElement } from "../shared/lib/full
 import { initMobileHaptics, triggerHaptic } from "../shared/lib/haptics";
 import Home from "../features/feed/Home";
 import LoginModal from "../features/account/LoginModal";
-import { ToastHost } from "../shared/ui/ui";
+import { Empty, ToastHost } from "../shared/ui/ui";
 import { DesktopRail, DesktopTitleBar } from "./shell/DesktopChrome";
 import ResizeHandles from "./shell/ResizeHandles";
 import { tracePlayback } from "../shared/diagnostics/playbackDiagnostics";
@@ -44,14 +44,27 @@ function PageLoading() {
 const SELECTABLE_TEXT = 'input, textarea, [contenteditable="true"], .select-text, .article-body';
 const isSelectableText = (target: EventTarget | null) => target instanceof Element && !!target.closest(SELECTABLE_TEXT);
 
+function useAvailableTabs(): readonly Tab[] {
+  const { capabilities, activeSource } = useStore();
+  const canCategory = capabilities.catalog.categories || capabilities.catalog.tags || capabilities.catalog.rankings || capabilities.catalog.authors || capabilities.posts || Boolean(activeSource?.catalog?.channels?.some((c) => (c.kind === "post" ? capabilities.posts : capabilities.catalog.categories)));
+  const tabs: Tab[] = [];
+  if (capabilities.home) tabs.push("home");
+  if (capabilities.search) tabs.push("search");
+  if (canCategory) tabs.push("category");
+  tabs.push("profile");
+  return tabs;
+}
+
 function TabBar() {
   const { tab, setTab } = useStore();
-  const items = [
+  const availableTabs = useAvailableTabs();
+  const allItems = [
     { key: "home", label: tr("首页"), Icon: IHome, Active: IHomeF },
     { key: "search", label: tr("搜索"), Icon: ISearch, Active: ISearch },
     { key: "category", label: tr("分类"), Icon: IGrid, Active: IGridF },
     { key: "profile", label: tr("我的"), Icon: IUser, Active: IUserF },
   ] as const;
+  const items = allItems.filter(item => availableTabs.includes(item.key));
   const index = Math.max(0, items.findIndex(item => item.key === tab));
   const glassRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
@@ -186,6 +199,8 @@ function StackPage(props: Parameters<typeof StackPageContent>[0]) {
 function StackPageContent({ page, onBack, wide, top, bottomInset, loginOpen }: {
   page: Page; onBack: () => void; wide: boolean; top: boolean; bottomInset: number; loginOpen: boolean;
 }) {
+  const { capabilities } = useStore();
+  const unsupported = <Empty icon={<IGrid size={26} />} title={tr("当前视频源不支持该功能")} action={tr("返回")} onAction={onBack} />;
   if (page.kind === "feed") {
     return (
       <Feed videoIds={page.videoIds} startIndex={page.index} title={page.title} kind={page.feedKind || "video"}
@@ -194,17 +209,17 @@ function StackPageContent({ page, onBack, wide, top, bottomInset, loginOpen }: {
     );
   }
   if (page.kind === "channel") return <ChannelPage cate={page.cate} name={page.name} onBack={onBack} wide={wide} />;
-  if (page.kind === "ranks") return <RankPage onBack={onBack} wide={wide} />;
+  if (page.kind === "ranks") return capabilities.catalog.rankings ? <RankPage onBack={onBack} wide={wide} /> : unsupported;
   if (page.kind === "settings") return <SettingsPage onBack={onBack} wide={wide} initialSection={page.section} />;
-  if (page.kind === "posts") return <PostsPage onBack={onBack} wide={wide} />;
-  if (page.kind === "post") return <PostDetail id={page.id} onBack={onBack} active={top && !loginOpen} />;
-  if (page.kind === "topics") return <TopicsPage onBack={onBack} wide={wide} />;
-  if (page.kind === "topic") return <TopicPage slug={page.slug} name={page.name} onBack={onBack} wide={wide} />;
-  if (page.kind === "tags") return <TagsPage onBack={onBack} wide={wide} />;
-  if (page.kind === "tag") return <TagPage tag={page.tag} name={page.name} onBack={onBack} wide={wide} />;
-  if (page.kind === "authors") return <AuthorsPage onBack={onBack} wide={wide} />;
-  if (page.kind === "following") return <FollowingPage onBack={onBack} wide={wide} />;
-  if (page.kind === "user") return <UserPage id={page.id} name={page.name} onBack={onBack} wide={wide} />;
+  if (page.kind === "posts") return capabilities.posts ? <PostsPage onBack={onBack} wide={wide} /> : unsupported;
+  if (page.kind === "post") return capabilities.posts ? <PostDetail id={page.id} onBack={onBack} active={top && !loginOpen} /> : unsupported;
+  if (page.kind === "topics") return capabilities.catalog.categories ? <TopicsPage onBack={onBack} wide={wide} /> : unsupported;
+  if (page.kind === "topic") return capabilities.catalog.categories ? <TopicPage slug={page.slug} name={page.name} onBack={onBack} wide={wide} /> : unsupported;
+  if (page.kind === "tags") return capabilities.catalog.tags ? <TagsPage onBack={onBack} wide={wide} /> : unsupported;
+  if (page.kind === "tag") return capabilities.catalog.tags ? <TagPage tag={page.tag} name={page.name} onBack={onBack} wide={wide} /> : unsupported;
+  if (page.kind === "authors") return capabilities.catalog.authors ? <AuthorsPage onBack={onBack} wide={wide} /> : unsupported;
+  if (page.kind === "following") return capabilities.account ? <FollowingPage onBack={onBack} wide={wide} /> : unsupported;
+  if (page.kind === "user") return capabilities.catalog.authors || capabilities.account ? <UserPage id={page.id} name={page.name} onBack={onBack} wide={wide} /> : unsupported;
   return null;
 }
 
@@ -300,11 +315,12 @@ function LayerBox({
 /* ============ 应用主体 ============ */
 function MainTabs({ wide, pageActive, covered, bottomInset }: { wide: boolean; pageActive: boolean; covered: boolean; bottomInset: number }) {
   const { tab } = useStore();
+  const availableTabs = useAvailableTabs();
   const [visited, setVisited] = useState<ReadonlySet<Tab>>(() => new Set());
   useEffect(() => {
-    if (pageActive) setVisited(previous => previous.has(tab) ? previous : new Set([...previous, tab]));
-  }, [tab, pageActive]);
-  const mounted = (key: Tab) => visited.has(key) || (pageActive && tab === key);
+    if (pageActive && availableTabs.includes(tab)) setVisited(previous => previous.has(tab) ? previous : new Set([...previous, tab]));
+  }, [tab, pageActive, availableTabs]);
+  const mounted = (key: Tab) => availableTabs.includes(key) && (visited.has(key) || (pageActive && tab === key));
   const visible = (key: Tab) => tab === key ? `absolute inset-0 ${key === "home" ? "" : "ios-tab-active"}` : "absolute inset-0 hidden pointer-events-none";
   // First visits mount on demand; subsequent switches preserve queries, scroll and playback state.
   // DialogFrame's syncBackground() owns modal inertness so portals inside fullscreenElement never inherit ancestor inert.
@@ -320,6 +336,7 @@ function MainTabs({ wide, pageActive, covered, bottomInset }: { wide: boolean; p
 
 function AppBody() {
   const { platform, tab, setTab, stack, pop, loginOpen, setLoginOpen, fs, setFs, clean, locked } = useStore();
+  const availableTabs = useAvailableTabs();
   const mainRef = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(false);
   const [shortLandscape, setShortLandscape] = useState(false);
@@ -348,14 +365,15 @@ function AppBody() {
       if (loginOpen) { if (e.key === "Escape") setLoginOpen(false); return; }
       if (e.key === "Escape") { if (runBack()) return; if (fs) { setFs(false); return; } if (getFullscreenElement()) { void exitDocumentFullscreen().catch(() => {}); return; } if (stack.length) pop(); return; }
       if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
-      if (e.key === "/") { e.preventDefault(); setTab("search"); return; }
+      if (e.key === "/" && availableTabs.includes("search")) { e.preventDefault(); setTab("search"); return; }
       if (["1", "2", "3", "4"].includes(e.key) && !e.repeat) {
-        setTab((["home", "search", "category", "profile"] as Tab[])[Number(e.key) - 1]);
+        const next = availableTabs[Number(e.key) - 1];
+        if (next) setTab(next);
       }
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
-  }, [stack.length, pop, setTab, loginOpen, setLoginOpen, fs, setFs]);
+  }, [stack.length, pop, setTab, loginOpen, setLoginOpen, fs, setFs, availableTabs]);
 
   const pageActive = stack.length === 0 && !loginOpen;
   const bottomInset = fs || clean || locked ? 0 : (shortLandscape ? 56 : 78);
@@ -411,6 +429,7 @@ function DesktopShell() {
 
 function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boolean }) {
   const { stack, pop, loginOpen, setLoginOpen, tab, setTab, platform, fs, setFs, setTheater } = useStore();
+  const availableTabs = useAvailableTabs();
   const mainRef = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(true);
 
@@ -440,14 +459,15 @@ function ShellInner({ collapsed, theater }: { collapsed: boolean; theater: boole
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
-      if (e.key === "/") { e.preventDefault(); setTab("search"); return; }
+      if (e.key === "/" && availableTabs.includes("search")) { e.preventDefault(); setTab("search"); return; }
       if (["1", "2", "3", "4"].includes(e.key) && !e.repeat) {
-        setTab((["home", "search", "category", "profile"] as Tab[])[Number(e.key) - 1]);
+        const next = availableTabs[Number(e.key) - 1];
+        if (next) setTab(next);
       }
     };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
-  }, [stack.length, pop, setTab, loginOpen, setLoginOpen, fs, setFs, theater, setTheater]);
+  }, [stack.length, pop, setTab, loginOpen, setLoginOpen, fs, setFs, theater, setTheater, availableTabs]);
 
   const pageActive = stack.length === 0 && !loginOpen;
 
@@ -503,7 +523,12 @@ function MobileShell() {
 /* ============ 入口 ============ */
 export default function App() {
   useLocale();
-  const { platform, loginOpen, setLoginOpen, tab, setTab, stack, pop, fs, setFs } = useStore();
+  const { platform, loginOpen, setLoginOpen, tab, setTab, stack, pop, fs, setFs, capabilities, sourceStateStatus, activeSource } = useStore();
+  const availableTabs = useAvailableTabs();
+  const defaultTab = availableTabs[0] ?? "profile";
+  useEffect(() => {
+    if (!availableTabs.includes(tab)) setTab(defaultTab);
+  }, [availableTabs, tab, defaultTab, setTab]);
   useEffect(() => {
     tracePlayback("navigation.change", { tab, stack: stack.map(p => ({ page: p.kind, key: p.key })), login_open: loginOpen });
   }, [tab, stack, loginOpen]);
@@ -546,7 +571,7 @@ export default function App() {
     if (getFullscreenElement()) { void exitDocumentFullscreen().catch(() => {}); return; }
     if (loginOpen) { setLoginOpen(false); return; }
     if (stack.length) { pop(); return; }
-    if (tab !== "home") { setTab("home"); return; }
+    if (tab !== defaultTab) { setTab(defaultTab); return; }
     invoke("plugin:app|exit", { code: 0 }).catch(() => {});
   };
 
@@ -572,17 +597,17 @@ export default function App() {
   useEffect(() => initMobileHaptics(), []);
 
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
+    if (!import.meta.env.DEV || sourceStateStatus !== "ready" || !activeSource?.capabilities.home) return;
     const t = window.setTimeout(() => {
       selfTest().then((r) => { invoke("debug_log", { msg: r }).catch(() => {}); }).catch(() => {});
     }, 2500);
     return () => window.clearTimeout(t);
-  }, []);
+  }, [sourceStateStatus, activeSource]);
 
   return (
     <>
       {isMobile ? <MobileShell /> : <DesktopShell />}
-      <LoginModal />
+      {capabilities.account && <LoginModal />}
       <ToastHost />
     </>
   );

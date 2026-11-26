@@ -562,7 +562,7 @@ export default function TvQrSyncModal({
               <input
                 value={manualText}
                 onChange={(e) => setManualText(e.target.value)}
-                placeholder={tr("电视二维码链接 / 视频源链接 / npm:包名")}
+                placeholder={tr("电视二维码链接 / 视频源链接 / hghubx-src:// 口令")}
                 className="w-full h-10 px-3 rounded-xl bg-white/10 text-[13px] text-white font-mono outline-none placeholder:text-white/45"
                 autoFocus
               />

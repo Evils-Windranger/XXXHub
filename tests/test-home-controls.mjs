@@ -75,14 +75,14 @@ try {
   assert.equal(await page.getByRole("button", { name: "搜索", exact: true }).count(), 0);
   assert.equal(await page.getByRole("button", { name: "视频详情", exact: true }).count(), 0);
   await page.evaluate(() => window.homeControlsProbe.setContextSearch(true));
-  assert.equal(await page.locator(".feed-context-search").innerText(), "搜短剧");
+  assert.equal(await page.locator(".feed-context-search").innerText(), "搜视频");
   const searchBox = await page.locator(".feed-context-search").boundingBox();
   const qualityBox = await page.locator(".feed-current-quality").boundingBox();
   assert.ok(searchBox && qualityBox);
   assert.equal(searchBox.height, qualityBox.height, "Search and quality controls must share the same height");
   assert.ok(Math.abs(searchBox.y - qualityBox.y) <= 0.5, "Search and quality controls must align on the same row");
   await page.screenshot({ path: path.join(output, "home-top-tools.png") });
-  await page.getByRole("button", { name: "搜短剧" }).click();
+  await page.getByRole("button", { name: "搜视频" }).click();
   assert.equal(await probe("openedTag"), "search");
   await page.evaluate(() => window.homeControlsProbe.setContextSearch(false));
   const portraitMore = await page.getByRole("button", { name: "更多播放设置" }).boundingBox();

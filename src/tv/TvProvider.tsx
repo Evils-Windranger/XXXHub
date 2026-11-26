@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { api, type TvSyncEnvelope } from "../shared/api/api";
+import { api, type InstalledSourceSummary, type SourceStateSnapshot, type TvSyncEnvelope } from "../shared/api/api";
 import { useContentPreferences } from "../shared/model/contentPreferences";
 import { autoLineEnabled, initAutoLine } from "../shared/network/autoLine";
 import { initializeLibrary, listLibrary, setFavorite, saveProgress, subscribeLibrary, clearHistory } from "./library";
@@ -12,6 +12,9 @@ import { applyTvSyncEnvelope } from "./tvSync";
 type TvState = {
   source: string;
   sourceKey: string;
+  sourceState: SourceStateSnapshot | null | "unsupported";
+  activeSource: InstalledSourceSummary | null;
+  refreshSourceState: () => void;
   library: TvLibraryEntry[];
   ready: boolean;
   error: string;
@@ -25,8 +28,11 @@ type TvState = {
 const Context = createContext<TvState | null>(null);
 
 export function TvProvider({ children }: { children: ReactNode }) {
-  const [source, setSource] = useState("");
+  const [lineBase, setLineBase] = useState("");
+  const [lineLoaded, setLineLoaded] = useState(false);
   const [epoch, setEpoch] = useState(0);
+  const [sourceState, setSourceState] = useState<SourceStateSnapshot | null | "unsupported">(null);
+  const [sourceStateSynced, setSourceStateSynced] = useState(false);
   const [library, setLibrary] = useState<TvLibraryEntry[]>([]);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
@@ -40,10 +46,46 @@ export function TvProvider({ children }: { children: ReactNode }) {
   const libraryRef = useRef(library);
   libraryRef.current = library;
   const sourceGeneration = useRef(0);
+  const sourceStateGeneration = useRef(0);
   const reloadGeneration = useRef(0);
   const pendingFavorites = useRef(new Set<string>());
   const lastSyncIdRef = useRef(0);
   const noticeTimerRef = useRef(0);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
+  const refreshSourceState = useCallback(() => {
+    const req = ++sourceStateGeneration.current;
+    setSourceStateSynced(false);
+    void api.sourceState()
+      .then((snap) => {
+        if (!alive.current || req !== sourceStateGeneration.current) return;
+        setSourceState(snap && typeof snap === "object" && Array.isArray(snap.sources) ? snap : "unsupported");
+        setSourceStateSynced(true);
+      })
+      .catch(() => {
+        if (!alive.current || req !== sourceStateGeneration.current) return;
+        setSourceState("unsupported");
+        setSourceStateSynced(true);
+      });
+  }, []);
+
+  const activeSource: InstalledSourceSummary | null =
+    sourceState && sourceState !== "unsupported"
+      ? (sourceState.sources.find((s) => s.active) ??
+         (sourceState.activeSourceId ? sourceState.sources.find((s) => s.id === sourceState.activeSourceId) ?? null : null))
+      : null;
+
+  const effectiveSource =
+    lineLoaded && sourceState !== null && sourceStateSynced
+      ? (lineBase || (activeSource ? `source://${activeSource.id}` : sourceState === "unsupported" ? "unsupported" : ""))
+      : "";
+  const sourceKey = effectiveSource ? `${effectiveSource}@${activeSource?.id ?? ""}@${epoch}` : "";
 
   const reload = useCallback(async () => {
     const generation = ++reloadGeneration.current;
@@ -52,7 +94,6 @@ export function TvProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    alive.current = true;
     let disposed = false;
     void (async () => {
       try {
@@ -65,8 +106,8 @@ export function TvProvider({ children }: { children: ReactNode }) {
         await reload();
         if (disposed) return;
         if (generation === sourceGeneration.current) {
-          setCatalogSource(boot.base);
-          setSource(boot.base);
+          setLineBase(boot.base);
+          setLineLoaded(true);
         }
         setReady(true);
       } catch (err) {
@@ -75,15 +116,32 @@ export function TvProvider({ children }: { children: ReactNode }) {
     })();
     return () => {
       disposed = true;
-      alive.current = false;
       reloadGeneration.current++;
       window.clearTimeout(noticeTimerRef.current);
     };
   }, [retryId, reload]);
 
   useEffect(() => {
-    if (ready && source) initAutoLine();
-  }, [ready, source]);
+    refreshSourceState();
+    const onSource = () => refreshSourceState();
+    window.addEventListener("hg:source-changed", onSource);
+    window.addEventListener("hg:line-changed", onSource);
+    return () => {
+      sourceStateGeneration.current++;
+      window.removeEventListener("hg:source-changed", onSource);
+      window.removeEventListener("hg:line-changed", onSource);
+    };
+  }, [refreshSourceState]);
+
+  useEffect(() => {
+    setCatalogSource(effectiveSource);
+  }, [effectiveSource]);
+
+  useEffect(() => {
+    if (ready && effectiveSource && (sourceState === "unsupported" || activeSource?.capabilities.lines)) {
+      initAutoLine();
+    }
+  }, [ready, effectiveSource, sourceState, activeSource?.capabilities.lines]);
 
   useEffect(() => subscribeLibrary(() => { void reload().catch((e) => setError(String(e))); }), [reload]);
 
@@ -93,12 +151,13 @@ export function TvProvider({ children }: { children: ReactNode }) {
       const current = ++sourceGeneration.current;
       // Invalidate the old response eligibility before reading the actual source.
       setCatalogSource("");
-      setSource("");
+      setLineBase("");
+      setLineLoaded(false);
       setEpoch((e) => e + 1);
       void api.lineState().then((state) => {
         if (!disposed && current === sourceGeneration.current) {
-          setCatalogSource(state.base);
-          setSource(state.base);
+          setLineBase(state.base);
+          setLineLoaded(true);
         }
       }).catch((e) => {
         if (!disposed && current === sourceGeneration.current) setError(String(e));
@@ -106,11 +165,13 @@ export function TvProvider({ children }: { children: ReactNode }) {
     };
     window.addEventListener("hg:line-changed", changed);
     window.addEventListener("hg:proxy-changed", changed);
+    window.addEventListener("hg:source-changed", changed);
     return () => {
       disposed = true;
       sourceGeneration.current++;
       window.removeEventListener("hg:line-changed", changed);
       window.removeEventListener("hg:proxy-changed", changed);
+      window.removeEventListener("hg:source-changed", changed);
     };
   }, []);
 
@@ -196,11 +257,11 @@ export function TvProvider({ children }: { children: ReactNode }) {
         },
         preferHevc: playback.quality === "hevc",
         autoLine: autoLineEnabled(),
-        lineBase: source || null,
+        lineBase: lineBase || null,
       }).catch(() => {});
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [ready, library, source, prefs.preferences, playback.quality]);
+  }, [ready, library, lineBase, prefs.preferences, playback.quality]);
 
   const toggleFavorite = useCallback(async (content: TvContent) => {
     const key = contentKey(content);
@@ -230,8 +291,11 @@ export function TvProvider({ children }: { children: ReactNode }) {
   return (
     <Context.Provider
       value={{
-        source,
-        sourceKey: `${source}@${epoch}`,
+        source: effectiveSource,
+        sourceKey,
+        sourceState,
+        activeSource,
+        refreshSourceState,
         library,
         ready,
         error,

@@ -38,7 +38,7 @@ macOS 文件位于 `~/Library/Application Support/com.hghubx.app/`：
 
 使用 `(pid, session, player, seek)` 关联一次操作。拖动期间的 `seek.input.change` 记录预览位置，松手后才发起一次 `seek.request` 和 currentTime 写入；点击在松开时定位，键盘定位立即执行。取消拖动或切到其他页面会丢弃预览，不发起跳转。播放器每 5 秒记录状态快照，非激活页面仍播放时可看到 `active: false` 与 `paused: false`。
 
-播放器在页面失活时暂停并停止 HLS 分片加载；清单稍后返回时也必须重新检查活动状态。重新进入页面时，之前正在播放的内容可继续播放；手动暂停的内容保持暂停。共用播放页与吃瓜详情的独立播放器均遵循此规则。
+播放器在页面失活时暂停并停止 HLS 分片加载；清单稍后返回时也必须重新检查活动状态。重新进入页面时，之前正在播放的内容可继续播放；手动暂停的内容保持暂停。共用播放页与图文详情的独立播放器均遵循此规则。
 
 hls.js 固定为 **1.6.19**，包含 [macOS/iOS 27 ManagedMediaSource 跳转恢复缓冲的上游修复](https://github.com/video-dev/hls.js/pull/7984)。两个播放器均显式配置 `preferManagedMediaSource: false`，在标准 MediaSource 可用时优先使用它；只有 ManagedMediaSource 的环境仍可回退，并由升级后的库在 seeking 时恢复缓冲。诊断日志中的 `hls_version`、`engine` 和 `prefer_managed` 可确认实际运行版本和路径。
 
@@ -56,7 +56,7 @@ HTTP 404/其他不可重试的 4xx、权限和安全拒绝直接结束；超时�
 
 验证默认关闭时点击不记录；通过设置开启后，实际鼠标点击和拖动应分别产生 `desktop_click`、`desktop_drag`，并串联 request、seeking、seeked、首帧恢复。拖动时有多个预览记录但没有实际定位，松手后恰好定位一次。暂停定位和键盘定位应产生 ready 且保持暂停；关闭后不再增加记录；保存失败保持原状态。前后端类型检查、Rust 日志脱敏/轮转/保存失败测试也随构建检查。
 
-追加 `&legacy=1` 可以检查吃瓜详情页使用的独立播放器。
+追加 `&legacy=1` 可以检查图文详情页使用的独立播放器。
 
 本地 Chromium 验证不替代 macOS WKWebView 实机复现。
 
@@ -92,7 +92,7 @@ CLI 默认选择六个场景；下表描述预期覆盖，具体通过情况以�
 | 场景 | 检查内容 |
 | --- | --- |
 | `seek` | 共用播放器的真实鼠标点击/拖动、拖动松手后仅定位一次、首帧恢复、暂停/键盘定位、失活取消拖动、开关关闭和保存失败 |
-| `legacy` | 吃瓜详情独立播放器的相同检查 |
+| `legacy` | 图文详情独立播放器的相同检查 |
 | `lifecycle` | 两个播放器延迟清单后失活、后台禁止自动播放和分片加载、重新激活后恢复、手动暂停状态保留，以及视频延迟挂载时保持失活 |
 | `gesture` | Feed 移动端首击在 230ms 内切换净屏，双击恢复界面并只切换一次播放状态 |
 | `proxy` | 代理变化后重建媒体连接，保留同一 video 元素、当前视频、位置和播放/暂停意图；播放地址接口失败后可重试 |
@@ -108,6 +108,6 @@ pnpm test:playback --scenarios seek,legacy
 
 其他参数：`--media-dir DIR` 复用已有 `list.m3u8` 与 `seg*.ts`；`--browser-executable PATH` 使用已安装的匹配版本 Chromium；`--output NEW_DIR` 指定新的产物目录。`FFMPEG_PATH` 可指定 FFmpeg 可执行文件。命令拒绝覆盖已经存在的输出目录。
 
-仓库在 `.github/workflows/ci.yml`（`CI`）中提供手动触发的 `mode=playback` 播放诊断，默认运行全部标准版场景（`seek,legacy,lifecycle,gesture,proxy,portrait-fit,ios-native,recovery,review,post-flicker`），也可通过 `scenarios` 输入指定子集；TV 版验收由独立工作流 `.github/workflows/tv.yml`（`TV CI`）执行。两者的检查任务在失败时仍会上传日志、截图与追踪，保留 7 天。
+仓库在 `.github/workflows/ci.yml`（`CI`）中提供手动触发的 `mode=playback` 播放诊断，默认运行全部标准版场景（`seek,legacy,lifecycle,gesture,proxy,portrait-fit,ambient,post-flicker,episode-toast,balance-volume,ios-native,recovery,review`），也可通过 `scenarios` 输入指定子集；TV 版验收由独立工作流 `.github/workflows/tv.yml`（`TV CI`）执行。两者的检查任务在失败时仍会上传日志、截图与追踪，保留 7 天。
 
 **覆盖边界：** 这些测试使用真实 React 控件、video、hls.js 与本地 HTTP 分片，但业务 API 和 Tauri 日志 IPC 使用替身。它们不执行真实 Rust 媒体代理，不验证真实 CDN、代理/TUN、Tauri 的 CSP/Origin/DNS 策略，也不能证明 macOS 27 的 ManagedMediaSource 问题已复现或修复。Rust 日志持久化/轮转/脱敏由 Rust 回归覆盖，执行结果以对应 GitHub Actions 记录为准；macOS 特有问题使用实机 `playback.log` 确认。

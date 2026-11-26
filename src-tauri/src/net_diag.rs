@@ -4,8 +4,8 @@
 //! handling stay separate from settings-only diagnostic reporting.
 
 use crate::net::{
-    base, build_client, edge_redirect_target, env_proxy_set, get, gnome_proxy, proxy_active,
-    proxy_override, redact_proxy, system_proxy_enabled, ProxyRoute,
+    base, build_client, env_proxy_set, get, gnome_proxy, proxy_active, proxy_override,
+    redact_proxy, system_proxy_enabled, ProxyRoute,
 };
 use crate::network_policy;
 use serde_json::{json, Value};
@@ -359,17 +359,7 @@ pub fn proxy_state() -> Value {
     })
 }
 
-fn healthy_proxy_response(status: u16, body: &[u8]) -> bool {
-    if status != 200 {
-        return false;
-    }
-    serde_json::from_slice::<Value>(body).is_ok_and(|value| {
-        value.get("status").and_then(Value::as_i64) == Some(1)
-            && value.get("data").is_some_and(crate::lines::healthy_video_data)
-    })
-}
-
-/// Probe the same anonymous edge envelope as line health, using an unsaved route.
+/// Probe origin reachability via `GET {origin}/` using an unsaved proxy route.
 /// A draft never mutates app settings or cached clients. Bound the whole request,
 /// including DNS, redirects and body, and do not echo untrusted response text.
 pub async fn test_proxy(mode: &str, url: &str) -> Value {
@@ -426,7 +416,10 @@ async fn probe_proxy_origin(
                 .get(reqwest::header::LOCATION)
                 .and_then(|value| value.to_str().ok())
                 .ok_or("重定向缺少有效 Location")?;
-            next = edge_redirect_target(&next, status, location, true)?;
+            if !matches!(status, 301 | 302 | 303) {
+                return Err("重定向已拒绝".into());
+            }
+            next = network_policy::redirect_target_with_mode(&next, location, strict)?;
             continue;
         }
         return Ok(if (200..400).contains(&status) {
@@ -446,7 +439,7 @@ fn proxy_probe_error(error: reqwest::Error) -> String {
     } else if error.is_connect() {
         "代理或目标连接失败，请检查地址、认证信息和网络"
     } else if error.is_body() || error.is_decode() {
-        "视频接口响应读取失败"
+        "代理连通性响应读取失败"
     } else {
         "代理连通性测试请求失败"
     }
@@ -574,23 +567,56 @@ pub async fn diagnose() -> Value {
 mod tests {
     use super::*;
 
-    #[test]
-    fn proxy_probe_checks_feed_envelope_instead_of_http_status_only() {
-        let valid = json!({"status": 1, "data": {"items": [{"id": 1, "title": "fixture"}], "pagination": {"page": 1, "size": 1, "pages": 1, "total": 1}}});
-        assert!(healthy_proxy_response(200, valid.to_string().as_bytes()));
-        assert!(!healthy_proxy_response(403, valid.to_string().as_bytes()));
-        for body in [
-            b"<html>homepage</html>".as_slice(),
-            br#"{"status":0,"data":{}}"#,
-            br#"{"status":1,"data":[]}"#,
-            br#"{"status":1,"data":{"items":[],"pagination":{}}}"#,
-        ] {
-            assert!(!healthy_proxy_response(200, body));
-        }
+    #[tokio::test]
+    async fn proxy_probe_checks_http_status_and_redirects() {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let serving = std::thread::spawn(move || {
+            for (idx, response) in [
+                "HTTP/1.1 403 Forbidden\r\nContent-Length: 9\r\nConnection: close\r\n\r\nforbidden",
+                "HTTP/1.1 302 Found\r\nLocation: /next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut req_line = String::new();
+                reader.read_line(&mut req_line).unwrap();
+                if idx == 2 {
+                    assert!(req_line.starts_with("GET http://unresolved.fixture.invalid/next HTTP/1.1"));
+                }
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line.trim().is_empty() {
+                        break;
+                    }
+                }
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+        });
+        let config = crate::proxy::Config::for_test("custom", &format!("http://{address}")).unwrap();
+        let denied = probe_proxy_origin("http://unresolved.fixture.invalid", &config, false)
+            .await
+            .unwrap();
+        assert_eq!(denied["ok"], false);
+        assert_eq!(denied["status"], 403);
+        assert_eq!(denied["error"], "目标返回错误状态码");
+
+        let redirected = probe_proxy_origin("http://unresolved.fixture.invalid", &config, false)
+            .await
+            .unwrap();
+        assert_eq!(redirected["ok"], true);
+        assert_eq!(redirected["status"], 200);
+        serving.join().unwrap();
     }
 
     #[tokio::test]
-    async fn proxy_probe_uses_post_envelope_and_does_not_save_draft() {
+    async fn proxy_probe_uses_get_and_does_not_save_draft() {
         use std::io::{BufRead, BufReader, Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();

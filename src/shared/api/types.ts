@@ -159,10 +159,10 @@ export type TagGroup = {
   tags: TagItem[];
 };
 
-/** 官网首页的热门标签列表；按官网展示顺序返回。 */
+/** 首页展示的热门标签列表；按视频源返回顺序展示。 */
 export type HotTagItem = { name: string; slug: string };
 
-/** 官网搜索页的影片热搜榜；plays 保留上游的播放量单位。 */
+/** 搜索页热门影片榜；plays 保留视频源返回的展示文本。 */
 export type HotSearchVideo = { video_id: number; title: string; plays: string };
 
 export type PostCategory = { id: number; name: string; route: string; intro?: string; sort?: number };
@@ -179,7 +179,7 @@ export type UserProfile = {
   counts?: Record<string, number>;
 };
 
-export type UserDirectory = { items: UserProfile[]; pagination?: Pagination };
+export type UserDirectory = { items: UserProfile[]; pagination?: Pagination; supported?: boolean };
 
 export type User = {
   id: number;

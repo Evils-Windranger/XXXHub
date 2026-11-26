@@ -60,7 +60,7 @@ export function getLocale(): Locale {
 function applyDocument() {
   if (typeof document === "undefined") return;
   document.documentElement.lang = LOCALE_OPTIONS.find(option => option.id === current)?.htmlLang ?? "zh-CN";
-  document.title = tr(N_("HGhubX · 短剧"));
+  document.title = "HGhubX";
 }
 
 async function loadDictionary(locale: Locale): Promise<Dictionary | null> {

@@ -3,7 +3,7 @@ import { Button, Surface } from "../../shared/ui/ios/controls";
 import { Loader } from "../../shared/ui/ios/effects";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, cover, fmt, isMobile } from "../../shared/api/api";
-import type { Post } from "../../shared/api/types";
+import type { Post, PostCategory } from "../../shared/api/types";
 import { ACTION_TOAST_SLOT, useStore } from "../../shared/model/store";
 import { copyText } from "../../shared/lib/clipboard";
 import { Empty, Img, Sheet } from "../../shared/ui/ui";
@@ -19,19 +19,36 @@ import { CommentsPanel } from "../feed/Panels";
 import { postHot } from "./postData";
 import { tr } from "../../shared/i18n";
 
-/* ================= 吃瓜列表 ================= */
+/* ================= 帖子列表 ================= */
 export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean }) {
-  const { push, lineEpoch } = useStore();
+  const { push, lineEpoch, capabilities } = useStore();
   const { preferences, blockReason } = useContentPreferences();
   const filtering = !preferences.paused && (preferences.blockedTags.length > 0 || preferences.hideUntagged);
   const [searching, setSearching] = useState(false);
+  const [categories, setCategories] = useState<PostCategory[]>([]);
+  const [selectedRoute, setSelectedRoute] = useState("");
+  useEffect(() => {
+    let alive = true;
+    setSelectedRoute("");
+    api.postCategories()
+      .then((res) => {
+        if (!alive) return;
+        setCategories(Array.isArray(res?.items) ? res.items.filter((c) => c?.route && c?.name) : []);
+      })
+      .catch(() => {
+        if (alive) setCategories([]);
+      });
+    return () => { alive = false; };
+  }, [lineEpoch]);
   const { items, page, pages, loading, err, autoLoadPaused, loadMore, scroller: scrollRef, sentinel } = usePaginatedList<Post>({
     filtering,
     isVisible: (item) => !blockReason(item.tags),
-    resetKey: lineEpoch,
+    resetKey: `${lineEpoch}:${selectedRoute}`,
     rootMargin: "240px",
     getId: (item) => item.id,
-    request: (next) => api.postCategory("remen-chigua", next, 20, "latest"),
+    request: (next) => selectedRoute
+      ? api.postCategory(selectedRoute, next, 20, "latest")
+      : api.posts(next, 20, "latest"),
   });
 
   return (
@@ -41,11 +58,23 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
           <Button aria-label={tr("返回")} onClick={onBack} className="ios-nav-btn"><IBack size={20} /></Button>
           <span className="w-9 h-9 rounded-[12px] bg-pc text-on-pc flex items-center justify-center shrink-0"><IFlame size={18} strokeWidth={1.9} /></span>
           <div className="flex-1 min-w-0">
-            <h1 className="text-[17px] font-bold text-on leading-tight">{tr("吃瓜")}</h1>
+            <h1 className="text-[17px] font-bold text-on leading-tight">{tr("图文帖子")}</h1>
             <div role="status" className="text-[12px] text-mut leading-tight mt-0.5">{loading && !items.length ? tr("加载中…") : tr("已加载 {0} 篇 · {1}/{2} 页", items.length, Math.max(page, 1), Math.max(pages, 1))}</div>
           </div>
-          <Button onClick={() => setSearching(true)} aria-label={tr("搜索吃瓜")} className="ios-nav-btn"><ISearch size={18} /></Button>
+          {capabilities.search && (
+            <Button onClick={() => setSearching(true)} aria-label={tr("搜索帖子")} className="ios-nav-btn"><ISearch size={18} /></Button>
+          )}
         </div>
+        {categories.length > 0 && (
+          <div className="ios-subpage-inner ios-channel-tabs pb-3 flex flex-wrap items-center gap-1.5">
+            <Button aria-pressed={selectedRoute === ""} onClick={() => setSelectedRoute("")} className="ios-filter-pill">{tr("全部")}</Button>
+            {categories.map((cat) => (
+              <Button key={cat.route} aria-pressed={selectedRoute === cat.route} onClick={() => setSelectedRoute(cat.route)} className="ios-filter-pill">
+                {cat.name}
+              </Button>
+            ))}
+          </div>
+        )}
       </div>
       <div ref={scrollRef} aria-busy={loading} className="flex-1 scroll-y pt-3.5 pb-8">
         {items.length ? (
@@ -59,9 +88,9 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
         ) : loading ? (
           <div className="flex justify-center py-12"><Loader className="w-8 h-8 spinner" /></div>
         ) : err ? (
-          <Empty icon={<IFireF size={26} />} title={tr("吃瓜内容加载失败")} sub={err} action={tr("重试")} onAction={() => loadMore(true)} />
+          <Empty icon={<IFireF size={26} />} title={tr("帖子内容加载失败")} sub={err} action={tr("重试")} onAction={() => loadMore(true)} />
         ) : (
-          <Empty icon={<IFireF size={26} />} title={tr("暂无吃瓜内容")} />
+          <Empty icon={<IFireF size={26} />} title={tr("暂无帖子内容")} />
         )}
         <div ref={sentinel} className="h-10" aria-hidden="true" />
         {err && items.length > 0 && (
@@ -73,20 +102,18 @@ export function PostsPage({ onBack, wide }: { onBack: () => void; wide: boolean 
         {!loading && !err && items.length > 0 && page < pages && autoLoadPaused && <Button onClick={() => loadMore()} className="w-full mt-3">{tr("加载更多")}</Button>}
         {loading && items.length > 0 && <div className="flex justify-center py-2"><Loader className="w-6 h-6 spinner" /></div>}
       </div>
-      {searching && <InplaceSearch kind="post" postLabel={tr("吃瓜帖子")} wide={wide} onClose={() => setSearching(false)} onOpenPost={(p) => push({ kind: "post", id: p.id })} />}
+      {searching && capabilities.search && <InplaceSearch kind="post" postLabel={tr("图文帖子")} wide={wide} onClose={() => setSearching(false)} onOpenPost={(p) => push({ kind: "post", id: p.id })} />}
     </div>
   );
 }
 
 const isHtml = (s: string) => /<(p|div|br|img|h[1-6]|ul|ol|li|blockquote|span|strong|em)\b/i.test(s);
-/* 过滤上游旧品牌标签，避免显示到界面。 */
-const HIDDEN_POST_TAG = "\u9ec4\u679c";
 
-/* ================= 吃瓜详情（网页式浏览） ================= */
+/* ================= 帖子详情（网页式浏览） ================= */
 export function PostDetail({ id, onBack, active = true }: { id: number; onBack: () => void; active?: boolean }) {
   const {
     toast, strictSecurity, muted, setMuted, volume, ambientGlow, balanceVolume, push, lineEpoch, accountScope,
-    isLiked, isFav, setLiked, setCollected, actionPending,
+    isLiked, isFav, setLiked, setCollected, actionPending, activeSource, capabilities,
   } = useStore();
   const { preferences, blockReason } = useContentPreferences();
   const filtering = !preferences.paused && (preferences.blockedTags.length > 0 || preferences.hideUntagged);
@@ -113,8 +140,8 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
   useEffect(() => { if (!allowed) { setTagMenu(false); setCommentsOpen(false); } }, [allowed]);
   const [err, setErr] = useState<string | null>(null);
   const [play, setPlay] = useState(false);
-  /* 吃瓜帖详情里的 video_url 恒为空，视频地址只在 playback 接口里；
-     不解析就整页只有图文（issue #11）。segs 是分段地址，多数帖只有 1 段。 */
+  /* 帖子详情里的 video_url 为空时，视频地址由 playback 接口下发；
+     不解析就整页只有图文。segs 是分段地址，多数帖只有 1 段。 */
   const [segs, setSegs] = useState<string[]>([]);
   const [seg, setSeg] = useState(0);
   const [resolving, setResolving] = useState(false);
@@ -134,9 +161,9 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
   // React 会在 HTML 属性对象身份变化时重写 innerHTML；滚动不能让配图重新加载。
   const articleHtml = useMemo(() => ({ __html: sanitizeHtml(content) }), [content, strictSecurity]);
   const openSafeLink = (url: string) => {
-    const videoId = parseInternalVideoId(url);
+    const videoId = parseInternalVideoId(url, activeSource?.origins ?? [], activeSource?.links?.videoIdPathPattern);
     if (videoId !== null) {
-      push({ kind: "feed", videoIds: [videoId], index: 0, title: post?.title || tr("吃瓜") });
+      push({ kind: "feed", videoIds: [videoId], index: 0, title: post?.title || tr("图文详情") });
       return;
     }
     api.openUrl(url).catch(() => {
@@ -207,7 +234,7 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
       <div className="ios-subpage-header shrink-0" style={{ paddingTop: isMobile ? "var(--sat, 0px)" : 0 }}>
         <div className="ios-subpage-bar">
           <Button aria-label={tr("返回")} onClick={onBack} className="ios-nav-btn"><IBack size={20} /></Button>
-          <span className="text-[16px] font-bold text-on">{tr("吃瓜详情")}</span>
+          <span className="text-[16px] font-bold text-on">{tr("图文详情")}</span>
           <Button disabled={!currentPost} onClick={() => { if (active && allowed) setTagMenu(true); }} className="ml-auto -mr-2 px-2.5 min-h-9 inline-flex items-center justify-end text-[13px] font-medium text-primary">{tr("不感兴趣")}</Button>
         </div>
       </div>
@@ -230,7 +257,7 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
                   ambientGlow={ambientGlow} balanceVolume={isMobile && balanceVolume}
                   onToggleMute={() => setMuted((m) => !m)} diagnosticContext={{ video_id: id, active: active && !tagMenu && !commentsOpen }} className="w-full h-full"
                   onEnded={() => {
-                    /* 多段吃瓜视频：播完自动接下一段；末段保留播放器以便回拖或重看 */
+                    /* 多段帖子视频：播完自动接下一段；末段保留播放器以便回拖或重看 */
                     if (seg < segs.length - 1) setSeg(seg + 1);
                   }} />
               ) : src ? (
@@ -268,7 +295,7 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
                 <span className="flex items-center gap-1"><IFireF size={10} />{fmt(postHot(currentPost))}</span>
               </div>
               <div className="flex flex-wrap gap-1.5 mt-2.5">
-                {(currentPost.tags || []).filter((t) => !t.includes(HIDDEN_POST_TAG)).slice(0, 8).map((t) => (
+                {(currentPost.tags || []).slice(0, 8).map((t) => (
                   <Button key={t} onClick={() => push({ kind: "tag", tag: t, name: t })}
                     className="inline-flex items-center justify-center min-h-0 h-7 px-2.5 rounded-(--r-ctl) bg-s3 text-[12px] text-on/85 hover:bg-s4 pressable">
                     #{t}
@@ -300,10 +327,12 @@ export function PostDetail({ id, onBack, active = true }: { id: number; onBack: 
                       {fav ? <IStarF size={15} className="text-amber" /> : <IStar size={15} />}
                       <span>{favCount > 0 ? fmt(favCount) : tr("收藏")}</span>
                     </Button>
-                    <Button onClick={() => setCommentsOpen(true)} className="h-9 px-3.5 rounded-full bg-s2 flex items-center gap-1.5 text-[13px] text-on pressable">
-                      <ICommentF size={14} />
-                      <span>{currentPost.counts?.comment ? fmt(currentPost.counts.comment) : tr("评论")}</span>
-                    </Button>
+                    {capabilities.detail.comments && (
+                      <Button onClick={() => setCommentsOpen(true)} className="h-9 px-3.5 rounded-full bg-s2 flex items-center gap-1.5 text-[13px] text-on pressable">
+                        <ICommentF size={14} />
+                        <span>{currentPost.counts?.comment ? fmt(currentPost.counts.comment) : tr("评论")}</span>
+                      </Button>
+                    )}
                   </>;
                 })()}
               </div>

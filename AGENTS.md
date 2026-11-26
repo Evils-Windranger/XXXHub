@@ -26,7 +26,7 @@ make check
 
 - `pnpm build` 分别按 `tsconfig.json`、`tsconfig.node.json` 和 `tsconfig.tests.json` 执行三次 TypeScript 检查，再执行 Vite 构建。
 - `pnpm test:smoke` 运行不需要 ffmpeg、真实 Tauri 宿主或上游网络的稳定浏览器用例。
-- `make check` 当前执行 `test-rust`、`test-web`、`docs`、`budget`、`release-check`；**不包含** `test:smoke` 与 TV 验收。
+- `make check` 当前执行 `test-rust`、`test-web`、`i18n`、`docs`、`budget`、`release-check`、`purity`；**不包含** `test:smoke` 与 TV 验收。
 - `make test-tv` 检查 TV 独立版本字段（`src-tauri/tauri.tv.conf.json`）并执行 `VITE_APP_EDITION=tv pnpm build`；完整 TV 验收用 `node scripts/test-tv-remote.mjs`。
 - `make release-check` 同时检查标准版与 TV 版版本字段及 Android `versionCode`；发版由 CI（标准版 `v*` / TV 版 `tv-v*`）执行，不在本地发布。
 - 完整播放回归用 `pnpm test:playback`；它需要 FFmpeg 和 Chromium，属于手动诊断而非 PR smoke。
@@ -42,7 +42,7 @@ CI 是验证记录。命令写了不等于已经运行；报告里必须写清�
 - `src/editionEntry.ts`、`src/legacyRuntime.ts`、`src/main.tsx`：加载旧版 WebView 垫片，按构建变体挂载标准版或 `src/tv/`（Android TV 版），并在使用协议确认后装配应用 Provider 和自动选线。
 - `src/app/`：`App.tsx` 负责页面栈、桌面/移动布局和全局交互；`shell/` 放窗口控件，
   `startup/` 放启动门。
-- `src/features/`：按 `account/category/discover/feed/playback/posts/search/settings` 归组页面、
+- `src/features/`：按 `account/authors/category/discover/feed/playback/posts/search/settings` 归组页面、
   专属组件与 hooks。Feed 的详情/评论/选集面板、设置页的线路/代理控件都随功能放置。
 - `src/tv/`：独立 Android TV 版页面、焦点导航、本地片库与播放界面。
 - `src/shared/`：`api`（IPC 与响应类型）、`model`（应用/账号/内容偏好状态）、`network`（自动选线）、
@@ -58,9 +58,10 @@ CI 是验证记录。命令写了不等于已经运行；报告里必须写清�
 
 - `src-tauri/src/api/`：Tauri command 与上游 endpoint，按 account/feed/video/interact/update/platform/lines 分文件；GitHub Release 更新检查与版本对比在 `updater.rs`。
 - `src-tauri/src/net/`：`line`（线路状态）、`proxy_env`、`client`（客户端缓存/DNS/GET）、
-  `redact`、`edge`（信封/重试/字节下载）；网络诊断与草稿代理探测在 `net_diag.rs`；共享 statics 和测试在 `mod.rs`/`tests.rs`。
+  `redact`、`edge`（重试/字节下载，无站点 API 信封）；网络诊断与草稿代理探测在 `net_diag.rs`；共享 statics 和测试在 `mod.rs`/`tests.rs`。
 - `src-tauri/src/media/`：图片、HLS、分片、Range、响应整形和本地媒体协议入口。
-- `src-tauri/src/lines/`：`mirror`、`probe` 负责固定/发布镜像/自定义线路、探测与自动选线；无状态发布页与 JS-as-data 解析在 `publish_parser.rs`。
+- `src-tauri/src/lines/`：`mirror`、`probe` 负责源声明固定线路/镜像发现委托/自定义线路、探测与自动选线；由源插件 `discoverMirrors` 提供镜像，Rust 不内置发布页解析。
+- `src-tauri/src/source/`：QuickJS 视频源插件沙箱、manifest/capabilities、Ed25519 验签、存储与局域网推源；`authors.rs` 承载作者目录命令。
 - `src-tauri/src/ios_layout.rs`、`ios_media_http.rs`、`linux_http.rs`、`linux_webview.rs`、
   `macos_titlebar.rs`：按 `cfg` 编译的平台壳；Windows/Android 的壳逻辑部分在 `lib.rs` 与前端。
 - `src-tauri/src/session.rs`、`cache.rs`、`env.rs`、`playback_log.rs`、`network_policy.rs`：

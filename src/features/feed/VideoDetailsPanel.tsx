@@ -6,6 +6,7 @@ import { Avatar, Img } from "../../shared/ui/ui";
 import { ContentTags } from "../../shared/ui/ContentTags";
 import { FilteredContent } from "../../shared/ui/FilteredContent";
 import { RowCard } from "../../shared/ui/cards";
+import { useStore } from "../../shared/model/store";
 import "../../styles/video-details.css";
 import { tr } from "../../shared/i18n";
 
@@ -22,6 +23,7 @@ export default function VideoDetailsPanel({ meta, videoId, episodeCount, related
   onBlockTag?: (tag: string) => void;
   onAuthor: () => void; onRelated: (video: VideoCard, visible: VideoCard[]) => void; onClose?: () => void;
 }) {
+  const { capabilities } = useStore();
   return <div className="video-details-panel" data-video-details>
     {onClose && <div className="video-details-heading">
       <h2>{tr("视频详情")}</h2>
@@ -45,23 +47,32 @@ export default function VideoDetailsPanel({ meta, videoId, episodeCount, related
         <ContentTags tags={meta.tags} onOpen={onTag} onBlock={onBlockTag} />
       </section>
 
-      <Surface className="video-details-author">
-        <Button onClick={onAuthor} disabled={meta.authorId <= 0} className="video-details-author-link">
-          <Avatar size={36} name={meta.author} hue={220} />
-          <span className="min-w-0"><span className="block text-[14px] font-semibold truncate">{meta.author}</span><span className="text-[12px] text-mut">{tr("作者主页")}</span></span>
-        </Button>
-        {meta.authorId > 0 && <Button onClick={onFollow} disabled={followPending} aria-busy={followPending} aria-pressed={following}
-          className={`video-details-follow ${following ? "bg-s3 text-mut" : "bg-primary text-on-primary"}`}>
-          {followPending ? tr("处理中…") : following ? tr("已关注") : tr("+ 关注")}
-        </Button>}
-      </Surface>
+      {(meta.author || (capabilities.catalog.authors && meta.authorId > 0)) && (
+        <Surface className="video-details-author">
+          {capabilities.catalog.authors && meta.authorId > 0 ? (
+            <Button onClick={onAuthor} className="video-details-author-link">
+              <Avatar size={36} name={meta.author} hue={220} />
+              <span className="min-w-0"><span className="block text-[14px] font-semibold truncate">{meta.author}</span><span className="text-[12px] text-mut">{tr("作者主页")}</span></span>
+            </Button>
+          ) : (
+            <div className="video-details-author-link">
+              <Avatar size={36} name={meta.author} hue={220} />
+              <span className="min-w-0"><span className="block text-[14px] font-semibold truncate">{meta.author}</span></span>
+            </div>
+          )}
+          {capabilities.catalog.authors && meta.authorId > 0 && <Button onClick={onFollow} disabled={followPending} aria-busy={followPending} aria-pressed={following}
+            className={`video-details-follow ${following ? "bg-s3 text-mut" : "bg-primary text-on-primary"}`}>
+            {followPending ? tr("处理中…") : following ? tr("已关注") : tr("+ 关注")}
+          </Button>}
+        </Surface>
+      )}
 
       <section className="video-details-section">
         <h3 className="video-details-section-heading">{tr("简介")}</h3>
         <p className="video-details-description">{meta.desc || tr("暂无简介")}</p>
       </section>
 
-      {related.length > 0 && <section className="video-details-section">
+      {capabilities.detail.related && related.length > 0 && <section className="video-details-section">
         <h3 className="video-details-section-heading">{tr("相关推荐")}</h3>
         <FilteredContent items={related.slice(0, 12)} scopeKey={videoId}>{visible => <div className="scroll-x flex gap-2.5 snap-x">
           {visible.map(video => <RowCard key={video.id} v={video} onOpen={() => onRelated(video, visible)} />)}

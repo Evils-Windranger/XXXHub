@@ -13,7 +13,7 @@ const fixture = {
   ready: false,
   setActive: (_active: boolean) => {},
   complete(cmd: string, key: string, result: "404" | "503" | "empty" | "item") {
-    const index = pending.findIndex(r => r.cmd === cmd && (!key || r.args.cate === key));
+    const index = pending.findIndex(r => r.cmd === cmd && (!key || r.args.cate === key || r.args.route === key));
     if (index < 0) throw new Error(`No pending request: ${cmd}/${key}`);
     const request = pending.splice(index, 1)[0];
     if (result === "404" || result === "503") {
@@ -36,6 +36,42 @@ Object.assign(window, {
   apiLoadingFixture: fixture,
   __TAURI_INTERNALS__: { invoke(cmd: string, args: Record<string, unknown> = {}) {
     if (cmd === "app_boot") return Promise.resolve({ user: null, logged_in: false, base: "https://fixture.invalid" });
+    if (cmd === "source_state") return Promise.resolve({
+      activeSourceId: "fixture-source",
+      allowUntrusted: true,
+      sources: [{
+        id: "fixture-source",
+        name: "Fixture Source",
+        version: "1.0.0",
+        description: "API loading fixture",
+        author: "Fixture",
+        apiVersion: "1",
+        runtimeKind: "quickjs",
+        origins: ["https://fixture.invalid"],
+        capabilities: {
+          home: true,
+          search: true,
+          catalog: { categories: true, tags: true, rankings: true, authors: true },
+          detail: { episodes: true, related: true, comments: true },
+          playback: { hls: true, mp4: true, subtitles: true },
+          posts: true,
+          account: true,
+          lines: true,
+        },
+        catalog: {
+          channels: [
+            { id: "channel-a", label: "精选频道" },
+            { id: "channel-b", label: "热播频道" },
+            { id: "channel-c", label: "专题频道" },
+            { id: "post-channel", label: "图文频道", kind: "post" },
+          ],
+        },
+        updateUrls: [],
+        signature: { status: "unsigned", keyId: "", fingerprint: "" },
+        installedAt: 0,
+        active: true,
+      }],
+    });
     if (cmd === "debug_log") { fixture.debug.push(String(args.msg)); return Promise.resolve(); }
     if (!["api_feed", "api_category", "api_original_videos", "api_post_category"].includes(cmd)) return Promise.reject(`Unexpected IPC: ${cmd}`);
     fixture.history.push({ cmd, args });

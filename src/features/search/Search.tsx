@@ -19,7 +19,7 @@ import { IBack, IChevR, IClose, IFireF, IPlayF, IRefresh, ISearch, ITrophy } fro
 import { tr, N_ } from "../../shared/i18n";
 
 export default function Search({ active, wide }: { active: boolean; wide: boolean }) {
-  const { push, searchHist, addSearch, removeSearch, clearSearchHist, lineEpoch, accountScope } = useStore();
+  const { push, searchHist, addSearch, removeSearch, clearSearchHist, lineEpoch, accountScope, capabilities } = useStore();
   const { preferences } = useContentPreferences();
   const filtering = !preferences.paused && (preferences.blockedTags.length > 0 || preferences.hideUntagged);
   const [q, setQ] = useState("");
@@ -92,9 +92,14 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
       setHotVideos([]);
       setHotError(null);
     }
+    if (!capabilities.catalog.rankings) return;
     // Reuse the ranking briefly when switching tabs; refresh it after the short cache expires.
     if (active && (epochChanged || Date.now() - hotLoadedAt.current > 60_000)) void refreshHot(epochChanged);
-  }, [active, lineEpoch]);
+  }, [active, lineEpoch, capabilities.catalog.rankings]);
+
+  useEffect(() => {
+    if (!capabilities.posts && tab === "post") setTab("video");
+  }, [capabilities.posts, tab]);
 
   const changeTab = (next: "video" | "post") => {
     if (next === tab) return;
@@ -125,9 +130,9 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
   const querying = submitted.length > 0;
   const tabSwipe = useTabSwipe<HTMLDivElement>({
     rootRef: scrollRef,
-    tabIndex: querying && tab === "post" ? 1 : 0,
-    tabCount: querying ? 2 : 1,
-    onTabChange: index => changeTab(index === 0 ? "video" : "post"),
+    tabIndex: querying && capabilities.posts && tab === "post" ? 1 : 0,
+    tabCount: querying && capabilities.posts ? 2 : 1,
+    onTabChange: index => { if (capabilities.posts) changeTab(index === 0 ? "video" : "post"); },
   });
   const currentHotTags = hotTagState.epoch === lineEpoch ? hotTagState.tags : {};
   const currentHotFailed = hotTagState.epoch === lineEpoch ? hotTagState.failed : [];
@@ -138,7 +143,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
   const missingHotKey = missingHotIds.join(",");
   const hotTagPending = filtering && missingHotIds.length > 0;
 
-  /* 官网热搜 HTML 不含标签；仅在开启屏蔽规则时按当前线路并发补查详情标签，未核验前不提前展示。 */
+  /* 热搜榜不含标签；仅在开启屏蔽规则时按当前线路并发补查详情标签，未核验前不提前展示。 */
   useEffect(() => {
     if (!active || querying || !filtering || !missingHotIds.length) return;
     let cancelled = false;
@@ -213,26 +218,29 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
         <Form className="ios-search-form flex-1 min-w-0 flex items-center gap-2"
           onSubmit={(e) => { e.preventDefault(); submit(q); }}>
           <ISearch size={17} className="text-mut shrink-0" />
-          <Input aria-label={tr("搜索短剧、帖子、题材…")} ref={inputRef} value={q}
+          <Input aria-label={capabilities.posts ? tr("搜索视频、帖子、题材…") : tr("搜索视频、题材…")} ref={inputRef} value={q}
             onChange={(e) => {
               const next = e.target.value;
               setQ(next);
               if (!next && submitted) { setSubmitted(""); results.clear(); }
             }}
-            placeholder={tr("搜索短剧、帖子、题材…")}
+            placeholder={capabilities.posts ? tr("搜索视频、帖子、题材…") : tr("搜索视频、题材…")}
             className="flex-1 min-w-0 bg-transparent text-[14px] text-on placeholder-dim outline-none" />
           {(q || submitted) && <Button aria-label={tr("清空搜索")} type="button" onClick={() => resetSearch()} className="ios-icon-button ios-search-clear"><IClose size={16} /></Button>}
         </Form>
-        <Button onClick={() => push({ kind: "ranks" })} aria-label={tr("排行榜")}
-          variant="primary" className="ios-icon-button ios-search-shortcut">
-          <ITrophy size={19} />
-        </Button>
+        {capabilities.catalog.rankings && (
+          <Button onClick={() => push({ kind: "ranks" })} aria-label={tr("排行榜")}
+            variant="primary" className="ios-icon-button ios-search-shortcut">
+            <ITrophy size={19} />
+          </Button>
+        )}
       </div>
 
       <div ref={scrollRef} {...tabSwipe} style={{ touchAction: "pan-y" }} className="flex-1 scroll-y pb-24">
         {!querying ? (
           <>
-            <Surface role="region" aria-label={tr("热搜榜")} className="mt-1 rounded-(--r-md) bg-s2 p-3.5 a-rise">
+            {capabilities.catalog.rankings && (
+              <Surface role="region" aria-label={tr("热搜榜")} className="mt-1 rounded-(--r-md) bg-s2 p-3.5 a-rise">
                 <div className="flex items-center justify-between gap-2">
                   <h2 className="flex items-center gap-1.5 text-[14px] font-semibold text-on/90"><IFireF size={15} className="text-primary" />{tr("热搜榜")}</h2>
                   <Button onClick={() => void refreshHot()} disabled={hotLoading} aria-label={tr("刷新热搜榜")}
@@ -269,6 +277,7 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
                   ) : renderHotList(verifiedHotVideos)
                 ) : !hotError && <p role="status" className="mt-3 text-[12px] text-mut">{hotLoading ? tr("加载中…") : tr("暂无热搜影片")}</p>}
               </Surface>
+            )}
 
             {searchHist.length > 0 && (
               <Surface className="mt-4 rounded-(--r-md) bg-s2 p-3.5 a-rise">
@@ -276,17 +285,19 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
               </Surface>
             )}
 
-            <SearchTags key={JSON.stringify([lineEpoch, accountScope])} active={active} />
+            {capabilities.catalog.tags && <SearchTags key={JSON.stringify([lineEpoch, accountScope])} active={active} />}
 
-            <SearchAuthors key={lineEpoch} active={active} />
+            {capabilities.catalog.authors && <SearchAuthors key={lineEpoch} active={active} />}
           </>
         ) : (
           <>
-            <SegmentedControl className="mt-1 mb-3" aria-label={tr("搜索结果类型")} activeIndex={tab === "video" ? 0 : 1}>
-              {([["video", tr("视频")], ["post", tr("帖子")]] as const).map(([k, label]) => (
-                <Button aria-pressed={tab === k} key={k} onClick={() => changeTab(k)}>{label}</Button>
-              ))}
-            </SegmentedControl>
+            {capabilities.posts && (
+              <SegmentedControl className="mt-1 mb-3" aria-label={tr("搜索结果类型")} activeIndex={tab === "video" ? 0 : 1}>
+                {([["video", tr("视频")], ["post", tr("帖子")]] as const).map(([k, label]) => (
+                  <Button aria-pressed={tab === k} key={k} onClick={() => changeTab(k)}>{label}</Button>
+                ))}
+              </SegmentedControl>
+            )}
             <div role="status" className="text-[12px] text-mut mb-2.5" aria-live="polite">
               {loading && <span className="block">{request?.page === 1 ? tr("正在搜索「{0}」…", submitted) : tr("正在加载更多…")}</span>}
               {result && <>「{result.keyword}{tr("」已加载")}{" "}<span className="text-primary font-bold">{count}{result.total !== null ? ` / ${result.total}` : ""}</span>{" "}{tr("条")}{result.kind === "post" ? tr("帖子") : tr("视频")}</>}
@@ -316,8 +327,9 @@ export default function Search({ active, wide }: { active: boolean; wide: boolea
               </> : loading ? (
                 <div className="flex justify-center py-12"><Loader label={tr("正在搜索")} className="w-8 h-8 spinner" /></div>
               ) : !err && (
-                <Empty icon={<ISearch size={26} />} title={tr("没有找到相关内容")} sub={tr("换个关键词试试，比如「都市」「逆袭」")}
-                  action={tr("看看排行榜")} onAction={() => push({ kind: "ranks" })} />
+                <Empty icon={<ISearch size={26} />} title={tr("没有找到相关内容")} sub={tr("换个关键词试试")}
+                  action={capabilities.catalog.rankings ? tr("看看排行榜") : undefined}
+                  onAction={capabilities.catalog.rankings ? () => push({ kind: "ranks" }) : undefined} />
               )}
             </section>
           </>

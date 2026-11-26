@@ -2,9 +2,10 @@
 
 ## 责任与边界
 
-网络层把业务调用收敛到上游的 `dx150-edge-v1` 作用域边缘网关（`/api/{public,dynamic,playback,user}/request`，对未迁移镜像保留旧 `/api/edge/request` 回退），并负责 HTTP 客户端缓存、系统/自定义
-代理、DNS 解析与地址固定、逐跳重定向、超时与有限重试、诊断和脱敏。媒体层复用同一套网络策略，
-把封面、HLS 清单、密钥和分片经本地路由交给 WebView/原生播放器。
+网络层负责通用 HTTP(S) 客户端缓存、系统/自定义代理、DNS 解析与地址固定、逐跳重定向、超时与
+有限重试、媒体字节下载、诊断和脱敏；业务接口的协议封装、请求信封与加解密已全部交由 QuickJS
+视频源插件通过受限 `host.fetch` 与 `host.crypto` 承担，Rust 壳不包含站点专属网关协议。
+媒体层复用同一套网络策略，把封面、HLS 清单、密钥和分片经本地路由交给 WebView/原生播放器。
 
 不在这里负责：线路候选与持久化（见 [upstream-lines.md](upstream-lines.md)）、播放器的 HLS 恢复
 状态机（见 [playback.md](playback.md)）、平台监听器的生命周期（见
@@ -12,10 +13,12 @@
 
 ## 事实来源
 
-- edge 与重试：[`src-tauri/src/net/edge.rs`](../../src-tauri/src/net/edge.rs) 的 `edge()`、
-  `edge_operation()`、`edge_redirect_target()`、`with_retry()`、`retryable_error()`、
-  `fetch_bytes()`；加密网关与作用域路由在 [`src-tauri/src/source/runtime.rs`](../../src-tauri/src/source/runtime.rs)（插件沙箱 `host.crypto`）
-  的 `scope_for()`、`PendingHandshake`、`EdgeSession`、`call_encrypted()`。
+- 下载与重试：[`src-tauri/src/net/edge.rs`](../../src-tauri/src/net/edge.rs) 的 `retryable_error()`、
+  `with_retry()`、`fetch_bytes()`、`fetch_bytes_with_url()`（`edge_redirect_target()` 仅用于 `#[cfg(test)]`）。
+- 源沙箱 HTTP 与加密原语：[`src-tauri/src/source/runtime.rs`](../../src-tauri/src/source/runtime.rs) 的
+  `host_http_request()`、`run_crypto_op()`（`host.fetch` 与 `host.crypto`）。
+- 线路基准同步：[`src-tauri/src/net/line.rs`](../../src-tauri/src/net/line.rs) 的
+  `base()`、`sync_base_for_source()`、`normalize_base()`。
 - 客户端与 DNS 固定：[`src-tauri/src/net/client.rs`](../../src-tauri/src/net/client.rs) 的
   `build_client()`、`ProxyRoute`、`client_key()`、`client_for_dns()`、
   `CLIENTS`、`CLIENT_TTL`、`refresh_client()`、`RequestScope`、`request_scope()`、
@@ -45,7 +48,12 @@
 
 ## 主运行时路径
 
-1. `Api::get/post/authed` 调 `edge(origin, method, path, body, token)`。`scope_for()` 按官网路由表将请求分流至 `public` / `dynamic` / `playback` / `user` 四个端点：`public` 优先走 `POST {origin}/api/public/request`（携带 `X-HG-Public-JSON: 1` 且查询参数按键名稳定排序，不发送凭据，遇旧协议 400 自动转加密通道）；`dynamic` / `playback` / `user` 走 `dx150-edge-v1`（ECDH P-256 握手 + HKDF-SHA256 派生 `req`/`res` AES-256-GCM 会话密钥，按 `(origin, scope)` 单飞缓存并在 `session_expired` 时自动重建重试一次；`Authorization` 仅在非 `public` 作用域写入加密包内）。仅当新端点返回 `404`/`405` 时兼容回退旧 `/api/edge/request`。响应要求 `status == 1`，否则取 `msg` 作为错误。仅 HTTP `401` 折叠成 `"401"`；HTTP `403` 保留 `"HTTP 403..."` 原状态，避免网络切换后的 CDN/WAF 拦截被误报为登录态失效，同时让前端自动选线感知连续 403 并切线。
+1. 业务接口由各模块经 `Api::source_call()` / `account_source_call()` 委托给 QuickJS 视频源插件；
+   插件通过 `host.fetch()`（即 `host_http_request()`）发起 HTTPS 请求，复用相同代理、DNS 固定、
+   严格模式校验与最多 5 跳重定向守卫，并强制校验目标与重定向 origin 属于 `manifest.network`
+   白名单、过滤 `Cookie`/`Host` 等受限头、限制响应体积 2 MB。`source/runtime.rs` 将插件抛出的
+   `"401"` / `status: 401` / `"HTTP 401..."` 统一规范为 `"401"`，其余 `"HTTP <nnn>..."`
+   原样透传以供前端识别 403 并触发自动切线。
 2. `with_retry()` 只对逻辑 GET、无 body 的请求重试，最多 3 次；408/425/429/5xx、超时/连接类
    错误可重试，401、404、403、地址策略拒绝和重定向错误一次即终止。重试前 `heal_client()` 会在
    3 秒节流内重建客户端，解决代理软件开关后的 tunnel error。
@@ -54,22 +62,23 @@
    `resolve_to_addrs()` 固定进客户端；有代理时把域名交给代理解析。缓存 30 秒，命中不延长
    TTL，最多 64 项，配置/代理/安全模式变化会推进 generation 并清空。
 4. `get_with_dns()` 关闭自动重定向，最多跟 5 跳。每一跳都重新 `parse_target()`、重新选客户端和
-   固定 DNS，`redirect_target()` 拒绝跨协议降级、认证信息和非法目标。`edge()` 更严格：只有
-   无 token、无 body 的游客 GET 才允许 301/302/303 迁移到新 origin；307/308、带凭据或带逻辑
-   body 的重定向直接拒绝。
+   固定 DNS，`redirect_target_with_mode()` 拒绝跨协议降级、认证信息和非法目标。
 5. 媒体下载统一走 `fetch_bytes()`：`get_with_dns()` 取字节，失败时按
    `media_dns::eligible()` 判断是否切换公网 DNS。只对 HTTPS 域名、DNS/timeout/transport
    类错误回退；403/404/503 或地址策略拒绝不回退。成功的公网 DNS 路由按 host 记住 30 秒。
-6. `media::handle()` 接受 `/img?u=`、`/hls?u=`、`/seg?u=`。`/img` 下载 AES-128-CBC 封面并
-   校验图片魔数；`/hls` 拉清单并把 variant、key、init、part、media 等 URI 改写到本地
-   `LOCAL_ORIGIN`，移除可派生的 URI 字段；`/seg` 下载分片或 Key，若返回 `#EXTM3U` 则继续改写，
-   保证嵌套清单不泄漏原始地址。
+6. `media::handle()` 接受 `/img?u=`、`/hls?u=`、`/seg?u=`。当激活源通过 `manifest.media.imageDecrypt`
+   声明解密参数且响应字节不是已知图片魔数时，`/img` 使用该参数执行 AES-128-CBC 解密并校验图片魔数；
+   明文 JPEG/PNG/GIF/WebP 直接透传；未声明解密参数且非图片魔数时直接报错，不在壳内内置默认密钥。
+   `/hls` 拉清单并把 variant、key、init、part、media 等 URI 改写到本地 `LOCAL_ORIGIN`，移除可派生的
+   URI 字段；`/seg` 下载分片或 Key，若返回 `#EXTM3U` 则继续改写，保证嵌套清单不泄漏原始地址。
 7. `apply_byte_range()` 只处理单段 `bytes=`，支持 `start-end`、`start-`、`-suffix`；无效/多段
    范围退回完整 200，越界返回 416。m3u8 永远完整返回，避免原生播放器的 0-1 字节探测把
    `#EXTM3U` 截掉。Linux 的 loopback HTTP 还支持 HEAD，并只发送一份 `Content-Length`/CORS 头。
 8. `diagnose()` 用与真实请求相同的路径做 DNS → TCP → HTTP 探测，读取 Windows 注册表、
-   macOS `scutil`、Linux `gsettings` 和进程环境变量，输出 `verdict/summary/advice`。代理地址只保留
-   协议/主机/端口，`NO_PROXY` 只报“已配置”，错误链中的 userinfo 替换成 `[redacted]@`。
+   macOS `scutil`、Linux `gsettings` 和进程环境变量，输出 `verdict/summary/advice`。`test_proxy()`
+   通过 `probe_proxy_origin()` 对当前激活 origin 发起 `GET {origin}/`（尊重 `strict` 校验并跟进最多 5 跳
+   `301|302|303` 重定向）；未导入源或 `base()` 为空时直接返回明确提示。代理地址只保留协议/主机/端口，
+   `NO_PROXY` 只报“已配置”，错误链中的 userinfo 替换成 `[redacted]@`。
 
 ## 状态转换
 
@@ -81,8 +90,8 @@
   后续失败或过期 → 回到系统解析路径。
 - 代理：`system` 每次建客户端时重新读系统设置；`custom` 用用户保存的地址；`off` 强制
   `no_proxy()`。保存代理会推进线路选择代次，旧探测不能在新代理保存后切换线路。
-- 响应：成功且 `status=1` → 返回 `data`；空 body → `Null`；业务失败 → `msg`；HTTP 401 →
-  `"401"`；HTTP 403 → `"HTTP 403..."`；网络错误 → 保留 source chain 的脱敏文本。
+- 响应：媒体字节请求返回 2xx 读取字节并按需经源声明参数解密；业务返回由源插件自行解包并遵循
+  统一数据结构，HTTP 401 → `"401"`，HTTP `<nnn>` → 原样透传，网络错误保留 source chain 的脱敏文本。
 
 ## 约束与失败行为
 
@@ -90,8 +99,7 @@
   198.18.0.0/15 的 FakeIP 是明确例外，不能当普通私网拒绝。
 - 系统解析的严格校验只固定可放行地址：TUN fake-IP 合成的 IPv6 ULA 假地址会被丢弃，
   fake-IP IPv4 保留；只有整组地址都不可放行才报错。外部 DNS（DoH）结果仍整体校验。
-- 不使用自动重定向。每一跳都要重新检查 scheme、主机/IP、DNS 和固定地址；发布页/脚本额外
-  要求同源，代理路径也必须保留逐跳检查，不能把安全判断交给代理。
+- 不使用自动重定向。每一跳都要重新检查 scheme、主机/IP、DNS 和固定地址；视频源 `host.fetch` 还会逐跳校验目标属于 `manifest.network`（`origins` / `publishOrigins`）白名单，代理路径也必须保留逐跳检查，不能把安全判断交给代理。
 - 只有 `reqwest` 的 `system-proxy` feature 能读取 Windows/macOS 固定系统代理；PAC 不支持。
   Android 的系统 Wi-Fi 代理不生效，只有 VPN/TUN 或显式 `HGHUBX_PROXY`。
 - 媒体路由是有限入口，不是开放代理：只允许 `/img`、`/hls`、`/seg`，只接受 `u=` 目标，
@@ -112,6 +120,7 @@ node scripts/test-diagnostic-copy.mjs
 node scripts/test-ios-native-media.mjs
 ```
 
-`src-tauri/src/net/`、`media_dns.rs`、`media/*`、`network_policy.rs` 的单元测试覆盖信封形状、重试终止、
-代理缓存键、DNS 回退、Range、嵌套清单和脱敏。联网测试标记为 `#[ignore]`，需要显式环境变量；
+`src-tauri/src/net/`、`src-tauri/src/source/`、`media_dns.rs`、`media/*`、`network_policy.rs` 的
+单元测试覆盖重试终止、代理缓存键、DNS 回退、`host.fetch`/`host.crypto`、401/403 错误传播、
+按需封面解密、Range、嵌套清单和脱敏。联网测试标记为 `#[ignore]`，需要显式环境变量；
 浏览器脚本使用本地 fixture，不证明真实 CDN 或系统代理环境。

@@ -9,6 +9,7 @@ import { lockTvSession, useTvPin } from "./pinLock";
 import { setPlaybackPreferences, usePlaybackPreferences } from "./preferences";
 import { TvPinSettingsModal, type TvPinModalMode } from "./TvPinGate";
 import TvLanPushPanel from "./TvLanPushPanel";
+import { useTv } from "./TvProvider";
 import { TvModal } from "./ui";
 import {
   cancelTvUpdateDownload,
@@ -33,7 +34,10 @@ function formatSyncTime(ts: number) {
 }
 
 export default function SettingsPage(){
-  const [group,setGroup]=useState(groups[0]),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[agreement,setAgreement]=useState(false),[pinModal,setPinModal]=useState<TvPinModalMode|null>(null);
+  const { activeSource, sourceState } = useTv();
+  const allowLines = sourceState === "unsupported" || Boolean(activeSource?.capabilities.lines);
+  const visibleGroups = allowLines ? groups : groups.filter(g => g !== "线路");
+  const [group,setGroup]=useState(visibleGroups[0]),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[agreement,setAgreement]=useState(false),[pinModal,setPinModal]=useState<TvPinModalMode|null>(null);
   const [lines,setLines]=useState<LineState|null>(null),[proxy,setProxy]=useState<ProxyState|null>(null),[auto,setAuto]=useState(autoLineEnabled);
   const [sources,setSources]=useState<SourceStateSnapshot|null>(null);
   const [peers,setPeers]=useState<PairedPeerSummary[]>([]);
@@ -42,19 +46,22 @@ export default function SettingsPage(){
   const operation = useRef(false);
   const preferences=useContentPreferences(),display=useTvDisplay(),playback=usePlaybackPreferences(),pin=useTvPin(),updater=useTvUpdater();
   useEffect(()=>{
+    if(!visibleGroups.includes(group))setGroup(visibleGroups[0]);
+  },[allowLines,group,visibleGroups]);
+  useEffect(()=>{
     let current=true, generation=0;
-    const refresh=()=>{const token=++generation;setAuto(autoLineEnabled());void Promise.all([api.lineState(),api.proxyState(),api.sourceState().catch(()=>null)]).then(([l,p,s])=>{if(current&&token===generation){setLines(l);setProxy(p);if(s)setSources(s);}}).catch(e=>{if(current&&token===generation)setMessage(String(e));});};
+    const refresh=()=>{const token=++generation;setAuto(autoLineEnabled());void Promise.all([allowLines?api.lineState():Promise.resolve(null),api.proxyState(),api.sourceState().catch(()=>null)]).then(([l,p,s])=>{if(current&&token===generation){setLines(l);setProxy(p);if(s)setSources(s);}}).catch(e=>{if(current&&token===generation)setMessage(String(e));});};
     refresh();
     const events=["hg:line-changed","hg:proxy-changed","hg:auto-line-changed","hg:source-changed"];
     events.forEach(name=>window.addEventListener(name,refresh));
     return()=>{current=false;events.forEach(name=>window.removeEventListener(name,refresh));};
-  },[]);
-  const readMirrors=async()=>{setMirrorError("");try{const result=await api.lineMirrors();setMirrors(result.items);}catch(e){setMirrorError(String(e));}};
+  },[allowLines]);
+  const readMirrors=async()=>{if(!allowLines)return;setMirrorError("");try{const result=await api.lineMirrors();setMirrors(result.items);}catch(e){setMirrorError(String(e));}};
   const refreshSources=()=>{void api.sourceState().then(setSources).catch(()=>{});};
   const refreshPeers=()=>{void api.tvPeerList().then(setPeers).catch(()=>{});};
   const refreshCache=()=>{void api.cacheStats().then(s=>{if(s&&typeof s.usedBytes==="number")setCacheInfo(s);}).catch(()=>{});};
   useEffect(()=>{
-    if(group==="线路")void readMirrors();
+    if(group==="线路"&&allowLines)void readMirrors();
     if(group==="视频源")refreshSources();
     if(group==="缓存")refreshCache();
     if(group==="手机同步"){
@@ -63,7 +70,7 @@ export default function SettingsPage(){
       void listen("hg:tv-peers-changed", () => refreshPeers()).then(fn => { unlisten = fn; }).catch(()=>{});
       return () => { unlisten?.(); };
     }
-  },[group]);
+  },[group,allowLines]);
   const run=async(action:()=>Promise<unknown>,success="已保存")=>{if(operation.current)return;operation.current=true;setBusy(true);setMessage("");try{await action();if(success)setMessage(success);}catch(e){setMessage(String(e));}finally{operation.current=false;setBusy(false);}};
   const availableLines=[...new Map([...(lines?.fixed||[]),...mirrors].map(line=>[line.url,line])).values()];
   const hasUpdate=Boolean(updater.info?.has_update);
@@ -89,7 +96,7 @@ export default function SettingsPage(){
     void checkTvUpdate(true);
   };
   return <><header className="tv-page-heading"><h1>设置</h1></header><div className="tv-settings">
-    <div className="tv-settings-groups" data-tv-region="settings-groups" data-tv-columns="1">{groups.map(name=><button data-tv-focus={`settings-${name}`} aria-pressed={group===name} key={name} onClick={()=>{setGroup(name);setMessage("");}}>{name}{name==="关于"&&hasUpdate&&<span className="tv-badge">新版</span>}</button>)}</div>
+    <div className="tv-settings-groups" data-tv-region="settings-groups" data-tv-columns="1">{visibleGroups.map(name=><button data-tv-focus={`settings-${name}`} aria-pressed={group===name} key={name} onClick={()=>{setGroup(name);setMessage("");}}>{name}{name==="关于"&&hasUpdate&&<span className="tv-badge">新版</span>}</button>)}</div>
     <section className="tv-settings-options"><h2>{group}</h2><p role="status">{busy?"正在应用…":message||preferences.storageError}</p>
       {group==="播放偏好"&&<><h3>默认倍速</h3><div className="tv-options" data-tv-region="default-rate">{[0.75,1,1.25,1.5,2].map(rate=><button role="radio" aria-checked={playback.rate===rate} data-tv-focus={`rate-${rate}`} key={rate} onClick={()=>{try{setPlaybackPreferences({rate});}catch(e){setMessage(String(e));}}}>{rate}×</button>)}</div><h3>默认清晰度</h3><div className="tv-options" data-tv-region="default-quality">{(["main","hevc"] as const).map(quality=><button key={quality} role="radio" aria-checked={playback.quality===quality} data-tv-focus={`quality-${quality}`} onClick={()=>{try{setPlaybackPreferences({quality});}catch(e){setMessage(String(e));}}}>{quality==="main"?"标准":"高清 HEVC（如有）"}</button>)}</div><button role="switch" aria-checked={playback.autoplayNext} data-tv-focus="autoplay-next" onClick={()=>{try{setPlaybackPreferences({autoplayNext:!playback.autoplayNext});}catch(e){setMessage(String(e));}}}>作品内自动续集：{playback.autoplayNext?"开启":"关闭"}</button></>}
       {group==="画面边距"&&<><p>背景和视频始终铺满屏幕。边距只作用于文字与控件。</p>{([['horizontal','左右'],['top','顶部'],['bottom','底部']] as const).map(([key,label])=><div className="tv-setting-row" data-tv-region={`margin-${key}`} key={key}><span>{label} {display[key]}%</span><button data-tv-focus={`margin-${key}-minus`} disabled={display[key]<=0} aria-label={`减少${label}边距`} onClick={()=>{if(!setTvDisplay({...display,[key]:display[key]-1}))setMessage("边距已生效，保存失败，请重试");}}>−</button><button data-tv-focus={`margin-${key}-plus`} disabled={display[key]>=12} aria-label={`增加${label}边距`} onClick={()=>{if(!setTvDisplay({...display,[key]:display[key]+1}))setMessage("边距已生效，保存失败，请重试");}}>＋</button></div>)}<button data-tv-focus="margin-reset" onClick={()=>{if(!setTvDisplay({horizontal:3,top:3,bottom:3}))setMessage("边距已生效，保存失败，请重试");}}>恢复 3% 边距</button></>}
@@ -131,7 +138,7 @@ export default function SettingsPage(){
           </div>)}
         </div>
       </>}
-      {group==="线路"&&<><p>当前：{lines?(hostOf(lines.base)||"未设置"):"正在读取"}</p><div data-tv-region="line-options" data-tv-columns="1"><button disabled={busy} role="switch" aria-checked={auto} data-tv-focus="auto-line" onClick={()=>void run(async()=>{await setAutoLine(!auto);setAuto(!auto);})}>自动选线：{auto?"开启":"关闭"}</button><button data-tv-focus="pick-line" disabled={busy||!auto} onClick={()=>void run(async()=>{await pickLine("tv-settings",true);setLines(await api.lineState());})}>重新检测可用线路</button>{mirrorError&&<p role="status">{mirrorError}</p>}<button data-tv-focus="refresh-mirrors" disabled={busy} onClick={()=>void run(readMirrors,"镜像线路已更新")}>刷新镜像线路</button>{availableLines.map(line=><button key={line.url} data-tv-focus={`line-${line.url}`} role="radio" aria-checked={lines?.base===line.url} disabled={busy} onClick={()=>void run(async()=>{await setAutoLine(false);setAuto(false);await api.lineSet(line.url);window.dispatchEvent(new Event("hg:line-changed"));setLines(await api.lineState());})}>{line.name||hostOf(line.url)}</button>)}</div></>}
+      {group==="线路"&&allowLines&&<><p>当前：{lines?(hostOf(lines.base)||"未设置"):"正在读取"}</p><div data-tv-region="line-options" data-tv-columns="1"><button disabled={busy} role="switch" aria-checked={auto} data-tv-focus="auto-line" onClick={()=>void run(async()=>{await setAutoLine(!auto);setAuto(!auto);})}>自动选线：{auto?"开启":"关闭"}</button><button data-tv-focus="pick-line" disabled={busy||!auto} onClick={()=>void run(async()=>{await pickLine("tv-settings",true);setLines(await api.lineState());})}>重新检测可用线路</button>{mirrorError&&<p role="status">{mirrorError}</p>}<button data-tv-focus="refresh-mirrors" disabled={busy} onClick={()=>void run(readMirrors,"镜像线路已更新")}>刷新镜像线路</button>{availableLines.map(line=><button key={line.url} data-tv-focus={`line-${line.url}`} role="radio" aria-checked={lines?.base===line.url} disabled={busy} onClick={()=>void run(async()=>{await setAutoLine(false);setAuto(false);await api.lineSet(line.url);window.dispatchEvent(new Event("hg:line-changed"));setLines(await api.lineState());})}>{line.name||hostOf(line.url)}</button>)}</div></>}
       {group==="网络"&&<><p>使用电视系统代理，或直接连接。网络设置影响当前应用。</p><div data-tv-region="proxy-options" data-tv-columns="1">{(["system","off"] as const).map(mode=><button key={mode} disabled={busy} role="radio" aria-checked={proxy?.mode===mode} data-tv-focus={`proxy-${mode}`} onClick={()=>void run(async()=>{setProxy(await api.proxySet(mode,""));window.dispatchEvent(new Event("hg:proxy-changed"));})}>{mode==="system"?"跟随系统代理":"直连"}</button>)}</div></>}
       {group==="缓存"&&<><p>{cacheInfo&&cacheInfo.usedBytes>0?`当前已缓存约 ${formatApkSize(cacheInfo.usedBytes)}，`:""}超过 {Math.round((cacheInfo?.limitBytes??120*1024*1024)/(1024*1024))} MB 时会自动清理较早缓存。手动清理不会影响本地片库、同步记录与偏好设置。</p><button data-tv-focus="clear-cache" disabled={busy} onClick={()=>void run(async()=>{await api.clearCache();resetCachedTvUpdate();refreshCache();},"缓存已清理，片库和偏好已保留")}>清理缓存</button></>}
       {group==="关于"&&<><h3>HGhubX TV {APP_VERSION}</h3>

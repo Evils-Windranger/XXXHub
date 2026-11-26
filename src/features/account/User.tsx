@@ -54,7 +54,7 @@ export function FollowingPage({ onBack, wide }: { onBack: () => void; wide: bool
 }
 
 function FollowingContent({ onBack, wide }: { onBack: () => void; wide: boolean }) {
-  const { push, user, follows, setLoginOpen, setTab, accountScope } = useStore();
+  const { push, user, follows, setLoginOpen, setTab, accountScope, capabilities } = useStore();
   const [searching, setSearching] = useState(false);
   const [creators, setCreators] = useState<Record<number, UserProfile>>({});
   const creatorsRef = useRef(creators);
@@ -91,7 +91,7 @@ function FollowingContent({ onBack, wide }: { onBack: () => void; wide: boolean 
           <h1 className="text-[17px] font-bold text-on leading-tight">{tr("关注")}</h1>
           {user && <p className="text-[12px] text-mut leading-tight mt-0.5" role="status">{follows.length > 0 ? tr("已关注 {0} 人 · ", follows.length) : ""}{countLabel(state)}</p>}
         </div>
-        <Button onClick={() => setSearching(true)} aria-label={tr("搜索短剧")} className="ios-nav-btn"><ISearch size={18} /></Button>
+        {capabilities.search && <Button onClick={() => setSearching(true)} aria-label={tr("搜索")} className="ios-nav-btn"><ISearch size={18} /></Button>}
       </div>
     </div>
     <div ref={state.scroller} className="flex-1 scroll-y pt-3.5 pb-8">
@@ -124,12 +124,12 @@ function FollowingContent({ onBack, wide }: { onBack: () => void; wide: boolean 
             {followSlice.length > 0 && <h2 className="mb-2.5 text-[14px] font-bold text-on">{tr("最新动态")}</h2>}
             <Masonry videos={state.items} scopeKey={`following:${accountScope}`} wide={wide} onOpen={(video, visible) => push({ kind: "feed", videoIds: visible.map(item => item.id), index: visible.findIndex(item => item.id === video.id), title: tr("关注") })} />
           </>
-          : follows.length > 0 ? <Empty icon={<IGrid size={26} />} title={tr("关注的创作者暂未发布新剧")} sub={tr("可点击上方头像进入创作者主页查看，或去分类发现更多作品。")} action={tr("去分类看看")} onAction={() => setTab("category")} />
+          : follows.length > 0 ? <Empty icon={<IGrid size={26} />} title={tr("关注的创作者暂未发布新内容")} sub={tr("可点击上方头像进入创作者主页查看，或去分类发现更多作品。")} action={tr("去分类看看")} onAction={() => setTab("category")} />
           : <Empty icon={<IGrid size={26} />} title={tr("还没有关注内容")} sub={tr("在分类中发现作品，关注喜欢的作者。")} action={tr("去分类看看")} onAction={() => setTab("category")} />}
         <PaginationFeedback state={state} />
       </>}
     </div>
-    {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list, kw) => push({ kind: "feed", videoIds: list.map(x => x.id), index: list.findIndex(x => x.id === v.id), title: kw ? tr("搜索 · {0}", kw) : tr("搜索") })} />}
+    {searching && capabilities.search && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list, kw) => push({ kind: "feed", videoIds: list.map(x => x.id), index: list.findIndex(x => x.id === v.id), title: kw ? tr("搜索 · {0}", kw) : tr("搜索") })} />}
   </div>;
 }
 
@@ -139,7 +139,7 @@ export function UserPage({ id, name, onBack, wide }: { id: number; name?: string
 }
 
 function UserContent({ id, name, onBack, wide }: { id: number; name?: string; onBack: () => void; wide: boolean }) {
-  const { push, toast, follows, setFollowing, toggleFollowLocal, actionPending, accountScope, user, setLoginOpen } = useStore();
+  const { push, toast, follows, setFollowing, toggleFollowLocal, actionPending, accountScope, user, setLoginOpen, capabilities } = useStore();
   const [searching, setSearching] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<Awaited<ReturnType<typeof api.userStats>> | null>(null);
@@ -289,7 +289,7 @@ function UserContent({ id, name, onBack, wide }: { id: number; name?: string; on
       <div className="ios-subpage-bar">
         <Button aria-label={tr("返回")} onClick={onBack} className="ios-nav-btn"><IBack size={20} /></Button>
         <h1 className="flex-1 min-w-0 text-[17px] font-bold text-on leading-tight truncate">{profile?.nickname || name || tr("用户主页")}</h1>
-        <Button onClick={() => setSearching(true)} aria-label={tr("搜索短剧")} className="ios-nav-btn"><ISearch size={18} /></Button>
+        {capabilities.search && <Button onClick={() => setSearching(true)} aria-label={tr("搜索")} className="ios-nav-btn"><ISearch size={18} /></Button>}
       </div>
     </div>
     <div ref={state.scroller} className="flex-1 scroll-y pt-3.5 pb-8">
@@ -329,6 +329,6 @@ function UserContent({ id, name, onBack, wide }: { id: number; name?: string; on
         : <Empty icon={<IGrid size={26} />} title={tr("暂无作品")} />}
       {!allWorksLoaded && metricSort === "default" && workStatus === "all" ? <PaginationFeedback state={state} /> : worksError && works.length > 0 ? <Button onClick={() => void loadAllWorks()} className="mt-3 w-full rounded-(--r-ctl) bg-s3">{tr("重试")}</Button> : null}
     </div>
-    {searching && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list, kw) => push({ kind: "feed", videoIds: list.map(x => x.id), index: list.findIndex(x => x.id === v.id), title: kw ? tr("搜索 · {0}", kw) : tr("搜索") })} />}
+    {searching && capabilities.search && <InplaceSearch kind="video" wide={wide} onClose={() => setSearching(false)} onOpenVideo={(v, list, kw) => push({ kind: "feed", videoIds: list.map(x => x.id), index: list.findIndex(x => x.id === v.id), title: kw ? tr("搜索 · {0}", kw) : tr("搜索") })} />}
   </div>;
 }

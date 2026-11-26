@@ -91,6 +91,7 @@ mod tests {
                         categories: false,
                         tags: true,
                         rankings: false,
+                        authors: false,
                     },
                     detail: DetailCapabilities {
                         episodes: true,
@@ -107,6 +108,8 @@ mod tests {
                     lines: false,
                 },
                 media: None,
+                catalog: None,
+                links: None,
             },
             code: code.into(),
             update_urls: vec![],
@@ -119,13 +122,13 @@ module.exports = {
   init() { return { ok: true }; },
   home({ page, size }) {
     return {
-      items: [{ id: 1001, title: "离线示例短剧", cover: "", tags: ["测试"], score: 9.2, episode_count: 10, total_episodes: 10, hot: 999, is_finished: true }],
+      items: [{ id: 1001, title: "离线示例视频", cover: "", tags: ["测试"], score: 9.2, episode_count: 10, total_episodes: 10, hot: 999, is_finished: true }],
       pagination: { page: page || 1, pages: 1, size: size || 20, total: 1 }
     };
   },
   search({ q, page, size }) {
     const hash = host.crypto.sha256Hex(q || "").slice(0, 6);
-    const items = host.htmlQuery("<ul><li data-id='1'>都市逆袭</li><li>甜宠</li></ul>", "li");
+    const items = host.htmlQuery("<ul><li data-id='1'>示例条目A</li><li>示例条目B</li></ul>", "li");
     return {
       items: [{ id: 2001, title: `${items[0].text}-${hash}`, cover: "", tags: ["测试"], score: 9.5, episode_count: 12, total_episodes: 12, hot: 5000, is_finished: true }],
       pagination: { page: page || 1, pages: 1, size: size || 20, total: 1 },
@@ -136,7 +139,7 @@ module.exports = {
     host.storage.set("last_detail", String(id));
     return {
       id,
-      title: "离线示例短剧",
+      title: "离线示例视频",
       episodes: [{ ep_num: 1, title: "第1集" }, { ep_num: 2, title: "第2集" }],
       counts: { like: 10, collect: 5, comment: 2, hot: 999 }
     };
@@ -149,7 +152,7 @@ module.exports = {
     };
   },
   hotTags() {
-    const nodes = host.htmlQuery("<div><a href='/t/a'>逆袭</a><a href='/t/b'>甜宠</a></div>", "a");
+    const nodes = host.htmlQuery("<div><a href='/t/a'>标签甲</a><a href='/t/b'>标签乙</a></div>", "a");
     return { items: nodes.map(n => ({ name: n.text, slug: n.attrs.href })) };
   }
 };
@@ -222,11 +225,11 @@ module.exports = {
         let store = Arc::new(SourceStore::new());
         let pkg = sample_pkg("1.0.0", FAKE_SOURCE_JS);
 
-        let res = invoke_source(store.clone(), pkg.clone(), "search", json!({ "q": "都市", "page": 1, "size": 5 }), Some(5))
+        let res = invoke_source(store.clone(), pkg.clone(), "search", json!({ "q": "示例", "page": 1, "size": 5 }), Some(5))
             .await
             .unwrap();
         assert_eq!(res["items"][0]["id"], 2001);
-        assert!(res["items"][0]["title"].as_str().unwrap().starts_with("都市逆袭-"));
+        assert!(res["items"][0]["title"].as_str().unwrap().starts_with("示例条目A-"));
 
         let det = invoke_source(store.clone(), pkg.clone(), "detail", json!({ "id": 1001 }), Some(5))
             .await
@@ -237,7 +240,7 @@ module.exports = {
         let tags = invoke_source(store.clone(), pkg.clone(), "hotTags", json!({}), Some(5))
             .await
             .unwrap();
-        assert_eq!(tags["items"][0]["name"], "逆袭");
+        assert_eq!(tags["items"][0]["name"], "标签甲");
 
         // Crypto round-trip: ECDH P-256 + HKDF-SHA256 + AES-256-GCM inside QuickJS!
         let crypto_pkg = sample_pkg("1.0.0", r#"
@@ -250,9 +253,9 @@ module.exports = {
     const kb = host.crypto.ecdhP256Derive(b.handle, a.publicKeyB64Url, salt, ["k1", "k2"]);
     if (ka[0] !== kb[0] || ka[1] !== kb[1]) throw new Error("ECDH mismatch");
     const nonce = host.crypto.randomBytes(12).b64;
-    const enc = host.crypto.aes256GcmEncrypt({ keyB64: ka[0], nonceB64: nonce, plaintextUtf8: "hello-dx150", aadUtf8: "aad-1" });
+    const enc = host.crypto.aes256GcmEncrypt({ keyB64: ka[0], nonceB64: nonce, plaintextUtf8: "hello-sandbox", aadUtf8: "aad-1" });
     const dec = host.crypto.aes256GcmDecrypt({ keyB64: kb[0], nonceB64: nonce, ciphertextB64Url: enc.ciphertextB64Url, aadUtf8: "aad-1" });
-    return { ok: dec.plaintextUtf8 === "hello-dx150", text: dec.plaintextUtf8 };
+    return { ok: dec.plaintextUtf8 === "hello-sandbox", text: dec.plaintextUtf8 };
   }
 };
 "#);
@@ -260,7 +263,24 @@ module.exports = {
             .await
             .unwrap();
         assert_eq!(crypto_res["ok"], true);
-        assert_eq!(crypto_res["text"], "hello-dx150");
+        assert_eq!(crypto_res["text"], "hello-sandbox");
+
+        // Auth & HTTP error propagation: "401" and "HTTP <nnn>..." preserve signals without wrapper prefix.
+        let err_pkg = sample_pkg("1.0.0", r#"
+module.exports = {
+  init() { return { ok: true }; },
+  authErr() { throw new Error("401"); },
+  httpErr() { throw new Error("HTTP 403: forbidden"); }
+};
+"#);
+        let e401 = invoke_source(store.clone(), err_pkg.clone(), "authErr", json!({}), Some(5))
+            .await
+            .unwrap_err();
+        assert_eq!(e401, "401");
+        let e403 = invoke_source(store.clone(), err_pkg, "httpErr", json!({}), Some(5))
+            .await
+            .unwrap_err();
+        assert_eq!(e403, "HTTP 403: forbidden");
 
         // Security: origin outside manifest.network.origins MUST be blocked.
         let ssrf_pkg = sample_pkg("1.0.0", r#"
@@ -297,7 +317,7 @@ module.exports = {
         assert_eq!(init_res["ok"], true);
         let h = invoke_source(store.clone(), ex.clone(), "home", json!({ "page": 1, "size": 10 }), Some(5)).await.unwrap();
         assert_eq!(h["items"].as_array().unwrap().len(), 2);
-        let s = invoke_source(store.clone(), ex, "search", json!({ "q": "逆袭", "page": 1, "size": 10 }), Some(5)).await.unwrap();
-        assert_eq!(s["items"].as_array().unwrap().len(), 1);
+        let s = invoke_source(store.clone(), ex, "search", json!({ "q": "沙箱", "page": 1, "size": 10 }), Some(5)).await.unwrap();
+        assert_eq!(s["items"].as_array().unwrap().len(), 2);
     }
 }

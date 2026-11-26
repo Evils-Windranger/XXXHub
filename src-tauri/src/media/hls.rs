@@ -187,7 +187,7 @@ mod tests {
     /// 与真实播放列表同构：带签名的分片地址 + 加密 KEY + 相对路径分片。
     #[test]
     fn playlist_rewrite_works() {
-        let base = "https://cdn.example/videos5/abc/abc.m3u8?auth_key=9999999999-0-0-deadbeef&v=3&via=hgdj";
+        let base = "https://cdn.example/videos5/abc/abc.m3u8?auth_key=9999999999-0-0-deadbeef&v=3&via=test";
         let text = "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin?auth_key=9999999999-0-0-deadbeef\"\n#EXTINF:4,\nseg-1.ts?auth_key=9999999999-0-0-deadbeef\n";
         let body = rewrite_playlist(base, text, LOCAL_ORIGIN);
 

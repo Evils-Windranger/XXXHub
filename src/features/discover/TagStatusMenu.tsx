@@ -86,7 +86,7 @@ export function TagStatusMenu({ status, counts, total, onChange, className = "" 
       aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
       onClick={() => setOpen(current => !current)} onKeyDown={onTriggerKeyDown}
       className="group inline-flex min-h-9 min-w-0 items-center gap-1.5 rounded-full px-1.5 text-left pressable">
-      <span className="text-[15px] font-bold text-on">{tr("短剧")}</span>
+      <span className="text-[15px] font-bold text-on">{tr("视频")}</span>
       <span className="text-[12px] text-mut tabular-nums">{total}</span>
       {active && <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[11px] font-semibold text-primary">
         {activeLabel}{activeCount !== null ? ` ${activeCount}` : ""}

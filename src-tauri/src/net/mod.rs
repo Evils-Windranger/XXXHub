@@ -1,7 +1,4 @@
-//! 网络层：与上游站点对话。
-//!
-//! 站点把全部 `/api/**` 调用收敛成 `POST /api/edge/request` 的信封，
-//! 我们只实现这一个入口，其余接口都是「填 path」。
+//! 网络层：通用 HTTP(S) 传输、代理路由与线路状态（业务请求已由 QuickJS 源插件承担）。
 //!
 //! # 代理（用户反馈「浏览器能开、HGhubX 打不开」的根因就在这里）
 //!
@@ -74,6 +71,7 @@ pub use client::{get, refresh_client, UA};
 pub(crate) use client::{build_client, get_with_dns, proxy_active, request_scope, ProxyRoute, RequestScope};
 pub use crate::net_diag::{diagnose, proxy_state, test_proxy};
 pub use edge::{fetch_bytes, fetch_bytes_with_url};
+#[cfg(test)]
 pub(crate) use edge::edge_redirect_target;
 pub use line::{
     base, bind_base, is_custom_line, normalize_base, set_base, set_custom_base,

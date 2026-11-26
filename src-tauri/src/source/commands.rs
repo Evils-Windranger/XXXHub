@@ -68,81 +68,14 @@ fn parse_deep_link_target(raw: &str) -> Option<String> {
     None
 }
 
-fn expand_npm_shorthand(spec: &str) -> Option<Vec<String>> {
-    let s = spec.trim().trim_start_matches('/');
-    if s.is_empty() || s.chars().any(char::is_whitespace) {
-        return None;
-    }
-    let (pkg_ver, file) = if s.starts_with('@') {
-        let slash1 = s.find('/')?;
-        let rest = &s[slash1 + 1..];
-        match rest.find('/') {
-            Some(slash2) => (&s[..slash1 + 1 + slash2], &rest[slash2 + 1..]),
-            None => (s, "hg.json"),
-        }
-    } else {
-        match s.find('/') {
-            Some(slash) => (&s[..slash], &s[slash + 1..]),
-            None => (s, "hg.json"),
-        }
-    };
-    if pkg_ver.is_empty() {
-        return None;
-    }
-    let file = if file.trim().is_empty() { "hg.json" } else { file.trim_start_matches('/') };
-    let has_ver = if pkg_ver.starts_with('@') {
-        pkg_ver[1..].contains('@')
-    } else {
-        pkg_ver.contains('@')
-    };
-    let full_pkg = if has_ver {
-        pkg_ver.to_string()
-    } else {
-        format!("{pkg_ver}@latest")
-    };
-    Some(vec![
-        format!("https://cdn.jsdelivr.net/npm/{full_pkg}/{file}"),
-        format!("https://fastly.jsdelivr.net/npm/{full_pkg}/{file}"),
-    ])
-}
-
-fn expand_gh_shorthand(spec: &str) -> Option<Vec<String>> {
-    let s = spec.trim().trim_start_matches('/');
-    if s.is_empty() || s.chars().any(char::is_whitespace) {
-        return None;
-    }
-    let mut parts = s.splitn(3, '/');
-    let owner = parts.next()?.trim();
-    let repo_ref = parts.next()?.trim();
-    let file = parts.next().map(str::trim).filter(|f| !f.is_empty()).unwrap_or("hg.json");
-    if owner.is_empty() || repo_ref.is_empty() {
-        return None;
-    }
-    let repo_with_ref = if repo_ref.contains('@') {
-        repo_ref.to_string()
-    } else {
-        format!("{repo_ref}@main")
-    };
-    Some(vec![
-        format!("https://cdn.jsdelivr.net/gh/{owner}/{repo_with_ref}/{file}"),
-        format!("https://fastly.jsdelivr.net/gh/{owner}/{repo_with_ref}/{file}"),
-    ])
-}
-
 fn expand_import_urls(trimmed: &str) -> Option<Vec<String>> {
     if let Some(inner) = parse_deep_link_target(trimmed) {
         return expand_import_urls(&inner);
     }
-    if let Some(rest) = trimmed.strip_prefix("npm:") {
-        return expand_npm_shorthand(rest);
-    }
-    if let Some(rest) = trimmed.strip_prefix("gh:") {
-        return expand_gh_shorthand(rest);
-    }
     if trimmed.starts_with("https://") || trimmed.starts_with("http://") {
         return Some(vec![trimmed.to_string()]);
     }
-    // Bare host/path shorthand (e.g. `example.com/hg.json`)
+    // Bare host/path shorthand (e.g. `example.com/source.json`)
     if !trimmed.starts_with('{')
         && !trimmed.starts_with("hghubx-src://")
         && !trimmed.chars().any(char::is_whitespace)
@@ -161,8 +94,6 @@ async fn resolve_raw_input(input: &str) -> Result<String, String> {
     if let Some(inner) = parse_deep_link_target(trimmed) {
         if !inner.starts_with("http://")
             && !inner.starts_with("https://")
-            && !inner.starts_with("npm:")
-            && !inner.starts_with("gh:")
             && expand_import_urls(&inner).is_none()
         {
             return Ok(inner);
@@ -347,8 +278,14 @@ pub async fn source_test(id: String, query: Option<String>) -> Result<SourceTest
         ("search", json!({ "q": q, "page": 1, "size": 5, "kind": "video" }))
     } else if pkg.manifest.capabilities.home {
         ("home", json!({ "page": 1, "size": 5 }))
+    } else if pkg.manifest.capabilities.posts {
+        ("posts", json!({ "page": 1, "size": 5 }))
+    } else if pkg.manifest.capabilities.catalog.tags {
+        ("hotTags", json!({}))
+    } else if pkg.manifest.capabilities.catalog.rankings {
+        ("rank", json!({ "kind": "hot" }))
     } else {
-        ("search", json!({ "q": "都市", "page": 1, "size": 5, "kind": "video" }))
+        ("search", json!({ "q": "", "page": 1, "size": 5, "kind": "video" }))
     };
     match invoke_source(store, pkg, method, input, Some(12)).await {
         Ok(val) => {
@@ -356,7 +293,7 @@ pub async fn source_test(id: String, query: Option<String>) -> Result<SourceTest
             let item_count = items.map_or(0, Vec::len);
             let sample_title = items
                 .and_then(|arr| arr.first())
-                .and_then(|v| v.get("title"))
+                .and_then(|v| v.get("title").or_else(|| v.get("name")))
                 .and_then(Value::as_str)
                 .map(str::to_string);
             Ok(SourceTestOutcome {

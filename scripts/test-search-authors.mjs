@@ -32,7 +32,7 @@ try {
     isMobile: true,
     hasTouch: true,
   });
-  await context.addInitScript(installFixture, { theme: "dark", titles: ["示例短剧"] });
+  await context.addInitScript(installFixture, { theme: "dark", titles: ["示例视频"] });
   const page = await context.newPage();
   page.on("pageerror", error => { throw error; });
   await page.route("**/*", route => {
@@ -113,7 +113,7 @@ try {
   await authorsPage.getByRole("button", { name: "刷新作者" }).click();
   await page.waitForTimeout(5000);
   const refreshedCalls = await page.evaluate(() => window.__AUTHOR_DIRECTORY_CALLS__());
-  assert.ok(refreshedCalls >= directoryCalls + 19 + 35, "the authors page refresh reloads every feed page and every follower stat");
+  assert.ok(refreshedCalls >= directoryCalls + 2, "the authors page refresh reloads every popular-authors directory page");
 
   const beforeBack = await page.evaluate(() => window.__AUTHOR_DIRECTORY_CALLS__());
   await authorsPage.getByRole("button", { name: "返回" }).click();

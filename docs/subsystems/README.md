@@ -12,8 +12,8 @@
 | --- | --- | --- |
 | 播放 | [playback.md](playback.md) | Feed/详情播放器、HLS 恢复、seek、进度、iOS 原生媒体、Linux GStreamer |
 | Feed 与详情 | [feed-and-detail.md](feed-and-detail.md) | 请求/缓存键、标签门、详情/评论/选集、预取、动作作用域 |
-| 上游线路 | [upstream-lines.md](upstream-lines.md) | 固定线路、发布镜像、自定义线路、JS-as-data、探测与持久化 |
-| 网络、代理与媒体 | [network-proxy-media.md](network-proxy-media.md) | edge 信封、客户端缓存、系统代理、DNS、重定向、媒体代理 |
+| 上游线路 | [upstream-lines.md](upstream-lines.md) | 源插件线路清单、镜像发现委托、自定义线路、探测与持久化 |
+| 网络、代理与媒体 | [network-proxy-media.md](network-proxy-media.md) | 客户端缓存、系统代理、DNS、重定向、媒体解密与代理 |
 | 平台壳 | [platform-shells.md](platform-shells.md) | iOS、macOS、Linux、Windows、Android 的 `cfg` 与本地传输 |
 | 存储与偏好 | [storage-and-preferences.md](storage-and-preferences.md) | `hghubx_*`、旧键迁移、账号/会话作用域、清缓存 |
 | 构建与发布 | [build-release.md](build-release.md) | pnpm/Tauri 构建、CI、版本同步、iOS/Android 产物 |

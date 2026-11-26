@@ -28,7 +28,7 @@ try {
     isMobile: true,
     hasTouch: true,
   });
-  await context.addInitScript(installFixture, { theme: "light", titles: ["示例短剧"] });
+  await context.addInitScript(installFixture, { theme: "light", titles: ["示例视频"] });
   const initialHot = [
     "都市", "古风", "奇幻", "现代", "职场", "逆袭",
     "校园", "绿帽", "熟女", "母子", "乱伦", "系统",

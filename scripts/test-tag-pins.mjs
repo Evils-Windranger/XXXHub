@@ -121,7 +121,7 @@ try {
   const pinButton = detail.getByRole("button", { name: "置顶此标签" });
   const pinControl = detail.locator(".tag-page-pin");
   await pinButton.waitFor();
-  assert.equal(await detail.getByRole("button", { name: "搜索短剧" }).count(), 0, "tag result header must replace search with pin");
+  assert.equal(await detail.getByRole("button", { name: "搜索" }).count() + await detail.getByRole("button", { name: "搜索视频" }).count(), 0, "tag result header must replace search with pin");
   const titleBox = await detail.getByRole("heading", { name: "都市" }).boundingBox();
   const pinBox = await pinButton.boundingBox();
   const tagIconBox = await detail.locator(".ios-subpage-bar > span.w-9").first().boundingBox();

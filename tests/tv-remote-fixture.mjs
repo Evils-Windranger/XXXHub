@@ -30,6 +30,7 @@ export function installTvFixture({ accepted = false, legacy, contentPreferences,
   window.addEventListener = (type, ...rest) => { if (type === "keydown") fixture.keyboardListeners++; return add(type, ...rest); };
   const callbacks = new Map(); let callbackId = 0;
   const paged = (items, args = {}, pages = 1) => ({ items, pagination: { page: args.page || 1, pages, size: args.size || 20, total: items.length * pages } });
+  window.__TAURI_EVENT_PLUGIN_INTERNALS__ ??= { unregisterListener() {} };
   window.__TAURI_INTERNALS__ = {
     metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
     transformCallback(callback) { const id = ++callbackId; callbacks.set(id, callback); return id; },
@@ -102,6 +103,40 @@ export function installTvFixture({ accepted = false, legacy, contentPreferences,
       }
       if (command === "api_topics") return { items: [] };
       if (command === "api_tags") return { categories: [] };
+      if (command === "source_state") return {
+        activeSourceId: "tv-fixture",
+        allowUntrusted: true,
+        sources: [{
+          id: "tv-fixture",
+          name: "TV Fixture Source",
+          version: "1.0.0",
+          description: "TV fixture source",
+          author: "Fixture",
+          apiVersion: "1",
+          runtimeKind: "quickjs",
+          origins: [base],
+          capabilities: {
+            home: true,
+            search: true,
+            catalog: { categories: true, tags: true, rankings: true, authors: false },
+            detail: { episodes: true, related: true, comments: true },
+            playback: { hls: true, mp4: true, subtitles: false },
+            posts: true,
+            account: false,
+            lines: true,
+          },
+          updateUrls: [],
+          signature: { status: "unsigned", keyId: "", fingerprint: "" },
+          installedAt: 0,
+          active: true,
+        }],
+      };
+      if (command === "source_take_deep_link") return null;
+      if (command === "tv_peer_start") return { url: "", ip: "127.0.0.1", port: 0, token: "" };
+      if (command === "source_lan_push_status") return { active: false, pairing: false, url: null, code: null, lastImported: null, lastSync: null };
+      if (command === "plugin:event|listen") return 0;
+      if (command === "plugin:event|unlisten") return null;
+      if (command === "tv_peer_update_snapshot") return null;
       fixture.unknown.push(command);
       throw new Error(`Unexpected TV fixture IPC: ${command}`);
     },

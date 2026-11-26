@@ -3,7 +3,7 @@ import { Button, SegmentedControl } from "../../shared/ui/ios/controls";
 import { Loader } from "../../shared/ui/ios/effects";
 import { fmtTime } from "../../shared/api/api";
 import type { Episode, Post, VideoCard } from "../../shared/api/types";
-import type { PageInput, Toast } from "../../shared/model/store";
+import { useStore, type PageInput, type Toast } from "../../shared/model/store";
 import { Sheet } from "../../shared/ui/ui";
 import { PlaybackProgress, PlaybackTime, PlayerControls, type PlaybackClock, type VideoHandle } from "../playback";
 import type { FeedMeta } from "./useFeedActions";
@@ -103,6 +103,7 @@ export function FeedPlayerShellChrome({
   pickEp, go, togglePip, lockControls, toggleFull, exitFs,
   onFollow, openTag, openTagMenu, closePanels, pushPage, toast,
 }: Omit<Props, "clean">) {
+  const { capabilities } = useStore();
   const liveMeta = { ...meta, like: likeCount, collect: collectCount };
   const landscapeStage = rotated || vpLandscape;
   const edgePad = landscapeStage ? 24 : 16;
@@ -122,9 +123,9 @@ export function FeedPlayerShellChrome({
   const scrubbing = activePct !== null;
   const detailBody = (onClose?: () => void) => (
     <VideoDetailsPanel meta={liveMeta} videoId={curId} episodeCount={episodes.length}
-      related={related} following={follows.includes(meta.authorId)} followPending={followPending}
+      related={capabilities.detail.related ? related : []} following={follows.includes(meta.authorId)} followPending={followPending}
       onFollow={() => void onFollow()} onTag={openTag} onBlockTag={tag => openTagMenu([tag])} onClose={onClose}
-      onAuthor={() => { if (meta.authorId > 0) { closePanels(); pushPage({ kind: "user", id: meta.authorId, name: meta.author }); } }}
+      onAuthor={() => { if (capabilities.catalog.authors && meta.authorId > 0) { closePanels(); pushPage({ kind: "user", id: meta.authorId, name: meta.author }); } }}
       onRelated={(video, visible) => { closePanels(); pushPage({ kind: "feed", videoIds: visible.map(item => item.id), index: visible.findIndex(item => item.id === video.id), title: tr("相关推荐") }); }} />
   );
 
@@ -281,7 +282,7 @@ export function FeedPlayerShellChrome({
             </Button>
             <PlaybackTime clock={playbackClock} duration={duration} padMinutes className="mobile-fs-time shrink-0 text-[12px] font-semibold hg-ink-2 tabular-nums" />
             <div className="ml-auto flex items-center gap-2 shrink-0">
-              {kind === "video" && episodes.length > 1 && (
+              {kind === "video" && capabilities.detail.episodes && episodes.length > 1 && (
                 <Button onClick={() => setPanel("episodes")} aria-label={tr("选集")}
                   className="mobile-fs-pill hg-chip shrink-0 flex items-center gap-1 px-3 h-9 rounded-full text-[12.5px] font-semibold hg-ink-2 pressable">
                   <IList size={15} /><span>{tr("选集")}</span>
@@ -311,9 +312,9 @@ export function FeedPlayerShellChrome({
         <div className={`desktop-dock-panel ${panel ? "is-open" : ""}`}>
           <div className="desktop-dock-inner">
             <Suspense fallback={<PanelFallback />}>
-              {panel === "detail" ? detailBody(() => setPanel(null)) : panel === "episodes" ? (
+              {panel === "detail" ? detailBody(() => setPanel(null)) : panel === "episodes" && capabilities.detail.episodes ? (
                 <EpisodesPanel videoId={curId} episodes={episodes} current={curEp} onPick={pickEp} onClose={() => setPanel(null)} />
-              ) : panel === "comments" ? (
+              ) : panel === "comments" && capabilities.detail.comments ? (
                 <CommentsPanel videoId={curId} ep={curEp} total={meta.comment} kind={kind} onClose={() => setPanel(null)} />
               ) : null}
             </Suspense>
@@ -330,9 +331,9 @@ export function FeedPlayerShellChrome({
           </Sheet>
 
           {/* 评论：移动端底部弹层（右侧操作栏「评论」入口） */}
-          <Sheet open={active && panel === "comments"} onClose={() => setPanel(null)}>
+          <Sheet open={active && panel === "comments" && capabilities.detail.comments} onClose={() => setPanel(null)}>
             <div className="feed-comments-sheet">
-              {panel === "comments" && (
+              {panel === "comments" && capabilities.detail.comments && (
                 <Suspense fallback={<PanelFallback />}>
                   <CommentsPanel videoId={curId} ep={curEp} total={meta.comment} kind={kind} onClose={() => setPanel(null)} />
                 </Suspense>
@@ -340,7 +341,7 @@ export function FeedPlayerShellChrome({
             </div>
           </Sheet>
 
-          {/* 吃瓜图文正文 */}
+          {/* 图文正文 */}
           <Sheet open={active && panel === "article"} onClose={() => setPanel(null)}>
             <div className="feed-article-sheet">
               {panel === "article" && (
@@ -351,29 +352,37 @@ export function FeedPlayerShellChrome({
             </div>
           </Sheet>
 
-          <Sheet open={active && (panel === "detail" || panel === "episodes")} label={panel === "detail" ? tr("视频详情") : tr("选集")} onClose={() => setPanel(null)}>
+          <Sheet open={active && (panel === "detail" || (panel === "episodes" && capabilities.detail.episodes))} label={panel === "detail" ? tr("视频详情") : tr("选集")} onClose={() => setPanel(null)}>
             <div className="video-details-sheet">
               {/* 双栏抽屉：详情 / 选集 */}
               <div className="shrink-0 flex items-center gap-2 px-4 pb-2">
-                <SegmentedControl className="flex-1" aria-label={tr("剧集面板")} activeIndex={panel === "detail" ? 0 : 1}>
-                  {([["detail", tr("详情")], ["episodes", tr("选集")]] as const).map(([k, l]) => (
-                    <Button aria-pressed={panel === k} key={k} onClick={() => setPanel(k)}>{l}</Button>
-                  ))}
-                </SegmentedControl>
+                {capabilities.detail.episodes ? (
+                  <SegmentedControl className="flex-1" aria-label={tr("剧集面板")} activeIndex={panel === "detail" ? 0 : 1}>
+                    {([["detail", tr("详情")], ["episodes", tr("选集")]] as const).map(([k, l]) => (
+                      <Button aria-pressed={panel === k} key={k} onClick={() => setPanel(k)}>{l}</Button>
+                    ))}
+                  </SegmentedControl>
+                ) : (
+                  <span className="flex-1 text-[15px] font-bold text-on">{tr("视频详情")}</span>
+                )}
                 <Button onClick={() => setPanel(null)} aria-label={tr("关闭")}
                   className="ios-icon-button">
                   <IClose size={14} />
                 </Button>
               </div>
 
-              {panel === "detail" || panel === "episodes" ? (
-                <PanelSwipeArea panel={panel} onChange={setPanel}>
-                  <Suspense fallback={<PanelFallback />}>
-                    {panel === "episodes" ? (
-                      <EpisodesPanel bare videoId={curId} episodes={episodes} current={curEp} onPick={pickEp} onClose={() => setPanel(null)} />
-                    ) : detailBody()}
-                  </Suspense>
-                </PanelSwipeArea>
+              {panel === "detail" || (panel === "episodes" && capabilities.detail.episodes) ? (
+                capabilities.detail.episodes ? (
+                  <PanelSwipeArea panel={panel} onChange={setPanel}>
+                    <Suspense fallback={<PanelFallback />}>
+                      {panel === "episodes" ? (
+                        <EpisodesPanel bare videoId={curId} episodes={episodes} current={curEp} onPick={pickEp} onClose={() => setPanel(null)} />
+                      ) : detailBody()}
+                    </Suspense>
+                  </PanelSwipeArea>
+                ) : (
+                  <Suspense fallback={<PanelFallback />}>{detailBody()}</Suspense>
+                )
               ) : null}
             </div>
           </Sheet>

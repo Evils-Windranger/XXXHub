@@ -6,12 +6,21 @@ import type { CatalogCheckpoint, CatalogQuery, CatalogStatus, SearchPreferences,
 import CatalogWorker from "./index.worker?worker";
 
 const DAY = 24 * 60 * 60 * 1000;
+export type CatalogChannelOptions = { videos?: boolean; posts?: boolean };
 const statuses = new Map<string, CatalogStatus>();
+const originOptions = new Map<string, { videos: boolean; posts: boolean }>();
 const listeners = new Set<() => void>();
 const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
 let worker: Worker | undefined, requestId = 0, source = "", generation = 0;
 let paused = false, running = false, initialized = false, timer: ReturnType<typeof setTimeout> | undefined;
 let lastInteraction = Date.now();
+function optionsFor(origin: string) {
+  return originOptions.get(origin) ?? { videos: true, posts: true };
+}
+function applyChannelOptions(origin: string, opts?: CatalogChannelOptions) {
+  if (!opts) return;
+  originOptions.set(origin, { videos: opts.videos !== false, posts: opts.posts !== false });
+}
 const empty = (origin: string): CatalogStatus => ({ source: origin, channels: [], count: 0, complete: false, updatedAt: 0,
   startedAt: 0, error: "", syncing: false, paused, initialized: false });
 function snapshot(origin: string) {
@@ -57,10 +66,18 @@ function checkpoint(origin: string): CatalogCheckpoint {
     updatedAt: value.updatedAt, startedAt: value.startedAt, error: value.error };
 }
 function fresh(origin: string): CatalogCheckpoint {
-  return { source: origin, channels: [
-    { key: "videos", kind: "video", nextPage: 1, pages: null, signatures: [], seenIds: [], complete: false },
-    { key: "posts", kind: "post", nextPage: 1, pages: null, signatures: [], seenIds: [], complete: false },
-  ], count: snapshot(origin).count, complete: false, updatedAt: snapshot(origin).updatedAt, startedAt: Date.now(), error: "" };
+  const opts = optionsFor(origin);
+  const channels: CatalogCheckpoint["channels"] = [];
+  if (opts.videos) channels.push({ key: "videos", kind: "video", nextPage: 1, pages: null, signatures: [], seenIds: [], complete: false });
+  if (opts.posts) channels.push({ key: "posts", kind: "post", nextPage: 1, pages: null, signatures: [], seenIds: [], complete: false });
+  return { source: origin, channels, count: snapshot(origin).count, complete: channels.length === 0, updatedAt: snapshot(origin).updatedAt, startedAt: Date.now(), error: "" };
+}
+function filterCheckpointChannels(origin: string, cp: CatalogCheckpoint): CatalogCheckpoint {
+  const opts = optionsFor(origin);
+  const savedByKind = new Map(cp.channels.map(c => [c.kind, c]));
+  const channels = fresh(origin).channels.map(def => savedByKind.get(def.kind) ?? def);
+  const complete = channels.length === 0 ? (!opts.videos && !opts.posts) : channels.every(c => c.complete);
+  return { ...cp, channels, complete };
 }
 function schedule(delay = 1200) {
   clearTimeout(timer);
@@ -82,15 +99,28 @@ export function setCatalogSource(origin: string) {
 export function setCatalogPaused(value: boolean) {
   paused = value;
   if (source) publish(source, { paused: value || document.visibilityState === "hidden" });
-  if (!value) schedule();
+  if (!value) {
+    const opts = source ? optionsFor(source) : null;
+    if (!opts || opts.videos || opts.posts) schedule();
+  }
 }
 async function loadStatus(origin: string, token: number) {
   try {
     await request({ type: "activate", source: origin, generation: token });
     const saved = await request<CatalogCheckpoint | undefined>({ type: "status", source: origin });
     if (stale(token, origin)) return;
-    publish(origin, { ...(saved || fresh(origin)), initialized: true, syncing: false, paused });
-    schedule();
+    const opts = optionsFor(origin);
+    const searchOnly = !opts.videos && !opts.posts;
+    const base = saved && saved.channels.length
+      ? filterCheckpointChannels(origin, saved)
+      : {
+          ...fresh(origin),
+          count: saved?.count ?? snapshot(origin).count,
+          complete: searchOnly,
+          updatedAt: searchOnly ? Date.now() : 0,
+        };
+    publish(origin, { ...base, initialized: true, syncing: false, paused });
+    if (!searchOnly) schedule();
   } catch (error) {
     if (!stale(token, origin)) publish(origin, { initialized: true, syncing: false, error: message(error) });
   }
@@ -112,13 +142,22 @@ function installLifecycle() {
   window.addEventListener("hg:proxy-changed", invalidate);
 }
 /** First search entry opts this installation into catalog synchronization. */
-export function startCatalog(origin: string) {
+export function startCatalog(origin: string, opts?: CatalogChannelOptions) {
   if (!origin) return;
+  applyChannelOptions(origin, opts);
+  const resolved = optionsFor(origin);
   if (!initialized) {
     initialized = true; installLifecycle(); activate(origin);
     void loadStatus(origin, generation);
   } else if (source !== origin) setCatalogSource(origin);
-  else schedule();
+  else {
+    const cur = snapshot(origin);
+    if (cur.initialized) {
+      const next = filterCheckpointChannels(origin, cur);
+      publish(origin, !resolved.videos && !resolved.posts ? { ...next, updatedAt: cur.updatedAt || Date.now() } : next);
+    }
+    if (resolved.videos || resolved.posts) schedule();
+  }
 }
 export function useCatalogStatus(origin: string) {
   return useSyncExternalStore(listener => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => snapshot(origin));
@@ -136,6 +175,13 @@ async function sync() {
   const origin = source, token = generation;
   const current = snapshot(origin);
   if (!current.initialized || current.error) return;
+  const opts = optionsFor(origin);
+  if (!opts.videos && !opts.posts) {
+    if (!current.complete || !current.updatedAt) {
+      publish(origin, { channels: [], complete: true, updatedAt: current.updatedAt || Date.now(), syncing: false });
+    }
+    return;
+  }
   if (current.complete && Date.now() - current.updatedAt < DAY) { schedule(60_000); return; }
   if (current.complete && Date.now() - lastInteraction < 30_000) { schedule(5000); return; }
   let next = current.complete ? fresh(origin) : checkpoint(origin);
@@ -148,7 +194,7 @@ async function sync() {
     if (!channel) { schedule(60_000); return; }
     const page = channel.nextPage;
     // There is one global runner, including source switches: never overlap pages.
-    const response = channel.kind === "video" ? await api.feed(page, 50) : await api.posts(page, 50, "latest");
+    const response = channel.kind === "video" ? await api.feed(page, 50) : await api.posts(page, 50);
     if (stale(token, origin)) return;
     const paging = response.pagination;
     if (!paging || !Number.isFinite(paging.page) || paging.page !== page || !Number.isFinite(paging.pages)) {
@@ -182,12 +228,13 @@ async function sync() {
     schedule();
   }
 }
-export async function retryCatalog(origin: string, restart = false) {
+export async function retryCatalog(origin: string, restart = false, opts?: CatalogChannelOptions) {
   if (!origin) return;
+  applyChannelOptions(origin, opts);
   // Retrying invalidates a page still in flight, including same-origin refreshes.
   activate(origin);
   const token = generation;
-  const next = restart ? fresh(origin) : { ...checkpoint(origin), error: "" };
+  const next = restart ? fresh(origin) : filterCheckpointChannels(origin, { ...checkpoint(origin), error: "" });
   if (!next.channels.length) Object.assign(next, fresh(origin));
   try {
     await request({ type: "activate", source: origin, generation: token });

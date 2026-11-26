@@ -3,6 +3,7 @@ import { api, cover } from "../shared/api/api";
 import { useContentPreferences } from "../shared/model/contentPreferences";
 import type { Detail } from "../shared/api/types";
 import type { TvContent, TvProgress } from "./model";
+import { useTv } from "./TvProvider";
 import { useRemoteScope } from "./remote";
 import { TvModal } from "./ui";
 import { detailContent, failureMessage, postParts, videoParts, type TvPart } from "./player/content";
@@ -22,9 +23,12 @@ type Props = {
 type Loaded = { request: string; content: TvContent; parts: TvPart[] };
 
 export default function DetailPage({ content, sourceKey, progress, favorite, onFavorite, onPlay, onBack, onMetadata }: Props) {
+  const { activeSource } = useTv();
   const preferences = useContentPreferences();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [error, setError] = useState("");
+  const allowPosts = !activeSource || activeSource.capabilities.posts;
+  const allowEpisodes = !activeSource || activeSource.capabilities.detail.episodes;
   const [retry, setRetry] = useState(0);
   const [more, setMore] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -51,6 +55,10 @@ export default function DetailPage({ content, sourceKey, progress, favorite, onF
     setError("");
     const current = () => alive && latest.current.request === request && transport === transportEpoch.current;
     if (!sourceReady || preferences.blockReason(content.tags)) return;
+    if (content.kind === "post" && !allowPosts) {
+      setError("当前视频源不支持图文帖子");
+      return;
+    }
     void (async () => {
       const value = content.kind === "video" ? await api.video(content.id) : await api.post(content.id);
       if (!current()) return;
@@ -72,7 +80,7 @@ export default function DetailPage({ content, sourceKey, progress, favorite, onF
       }
     })().catch(cause => { if (current()) setError(failureMessage(cause, "详情加载失败，请重试")); });
     return () => { alive = false; };
-  }, [request]);
+  }, [request, allowPosts]);
 
   useEffect(() => { setMore(false); setSelectedTags([]); }, [key, sourceKey, preferences.revision]);
   useRemoteScope({ id: `detail:${key}`, priority: 20, onKey: remote => {
@@ -102,7 +110,7 @@ export default function DetailPage({ content, sourceKey, progress, favorite, onF
     {blocked ? <div className="tv-detail-message" role="status"><h1>内容已屏蔽</h1><p>{blocked}</p><p>你可以在设置中调整标签偏好。</p></div> : <>
       <div className="tv-detail-hero">
         <div className={`tv-detail-cover ${content.kind === "post" ? "tv-detail-cover-wide" : ""}`}>
-          {displayed && item.cover ? <img src={cover(item.cover)} alt={`${item.title}封面`} /> : <span>HGhubX</span>}
+          {displayed && item.cover ? <img src={cover(item.cover)} alt={`${item.title}封面`} /> : <span>暂无封面</span>}
         </div>
         <div className="tv-detail-copy">
           <h1>{item.title}</h1>
@@ -112,13 +120,13 @@ export default function DetailPage({ content, sourceKey, progress, favorite, onF
           <div className="tv-detail-actions" data-tv-region="detail-actions">
             <button data-tv-focus={`detail:${key}:play`} className="tv-primary" disabled={!firstPart} onClick={() => firstPart && onPlay(item, firstPart, resumeSeconds)}>{resumeSeconds > 0 || nextPart ? "继续观看" : resumable && progress!.seconds > 0 ? "重新播放" : "播放"}</button>
             <button data-tv-focus={`detail:${key}:favorite`} aria-pressed={favorite} disabled={!displayed || favoritePending} onClick={() => void toggleFavorite()}>{favorite ? "取消收藏" : "收藏"}</button>
-            <button data-tv-focus={`detail:${key}:episodes`} disabled={!parts.length} onClick={() => document.querySelector<HTMLButtonElement>(".tv-detail-episodes [data-tv-focus]")?.focus()}>{content.kind === "post" ? "选择分段" : "选集"}</button>
+            {(content.kind === "post" || allowEpisodes) && <button data-tv-focus={`detail:${key}:episodes`} disabled={!parts.length} onClick={() => document.querySelector<HTMLButtonElement>(".tv-detail-episodes [data-tv-focus]")?.focus()}>{content.kind === "post" ? "选择分段" : "选集"}</button>}
             <button data-tv-focus={`detail:${key}:more`} disabled={!displayed || !item.tags.length} onClick={() => { setSelectedTags([]); setMore(true); }}>更多</button>
           </div>
         </div>
       </div>
       {error ? <div className="tv-detail-message" role="alert"><p>{error}</p><div data-tv-region="detail-retry"><button data-tv-focus={`detail:${key}:retry`} onClick={() => setRetry(value => value + 1)}>重试</button></div></div> : !displayed ? <p role="status">正在加载详情…</p> : null}
-      {!!parts.length && <div className="tv-detail-episodes"><h2>{content.kind === "post" ? "视频分段" : "剧集"}</h2><div className="tv-detail-episode-grid" data-tv-region="detail-episodes" data-tv-columns="5">
+      {!!parts.length && (content.kind === "post" || allowEpisodes) && <div className="tv-detail-episodes"><h2>{content.kind === "post" ? "视频分段" : "剧集"}</h2><div className="tv-detail-episode-grid" data-tv-region="detail-episodes" data-tv-columns="5">
         {parts.map(part => {
           const partResume = progress?.key === key && progress.part === part.id
             && !(part.duration && part.duration > 0 && progress.seconds >= Math.max(1, part.duration - 3))

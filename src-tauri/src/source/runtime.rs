@@ -687,8 +687,25 @@ pub async fn invoke_source_with_ctx(
                     return JSON.stringify({ __unsupported: true, method });
                   }
                   const input = JSON.parse(globalThis.__CALL_INPUT__);
-                  const out = fn.call(src, input, globalThis.host);
-                  return JSON.stringify(out === undefined ? null : out);
+                  try {
+                    const out = fn.call(src, input, globalThis.host);
+                    return JSON.stringify(out === undefined ? null : out);
+                  } catch (err) {
+                    const msg = err && typeof err === "object" && "message" in err
+                      ? String(err.message ?? "")
+                      : String(err ?? "");
+                    const trimmed = msg.trim();
+                    const status = err && typeof err === "object" && "status" in err
+                      ? Number(err.status)
+                      : NaN;
+                    if (trimmed === "401" || status === 401 || /^HTTP 401\b/.test(trimmed)) {
+                      return JSON.stringify({ __authError: 401 });
+                    }
+                    if (/^HTTP \d{3}\b/.test(trimmed)) {
+                      return JSON.stringify({ __httpError: trimmed });
+                    }
+                    throw err;
+                  }
                 })()
             "#;
 
@@ -706,6 +723,12 @@ pub async fn invoke_source_with_ctx(
 
             let parsed: Value = serde_json::from_str(&result_json)
                 .map_err(|e| format!("视频源返回 JSON 无效：{e}"))?;
+            if parsed.get("__authError").and_then(Value::as_u64) == Some(401) {
+                return Err("401".to_string());
+            }
+            if let Some(http_err) = parsed.get("__httpError").and_then(Value::as_str) {
+                return Err(http_err.to_string());
+            }
             if parsed.get("__unsupported").and_then(Value::as_bool) == Some(true) {
                 return Err(format!(
                     "当前视频源未实现该方法：{}",

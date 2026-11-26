@@ -10,7 +10,7 @@ import { tr } from "../../shared/i18n";
 
 const BATCH_SIZE = 10;
 
-/** Use the official site's curated popular tags in upstream order. */
+/** Curated popular tags returned by the active source. */
 export function SearchTags({ active }: { active: boolean }) {
   const { push } = useStore();
   const { preferences, isTagBlocked } = useContentPreferences();

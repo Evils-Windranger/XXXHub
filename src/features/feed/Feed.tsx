@@ -48,7 +48,7 @@ export default function Feed({
   const {
     isLiked, isFav, setLiked, setCollected, setFollowing, toggleFollowLocal, actionPending, accountScope,
     muted, setMuted, volume, setVolume, toast, addHistory, user,
-    swipeEp, setSwipeEp, preferHevc, setPreferHevc, ambientGlow,
+    swipeEp, setSwipeEp, preferHevc, setPreferHevc, ambientGlow, capabilities,
   } = store;
   const isDesktop = !isMobile;
   const holdGuide = useMobileHoldGuide();
@@ -307,13 +307,13 @@ export default function Feed({
     }
   };
 
-  /** 统一视图模型：短剧与吃瓜帖子共用同一套播放界面 */
+  /** 统一视图模型：视频与图文帖子共用同一套播放界面 */
   const meta: FeedMeta = kind === "post"
     ? {
         title: post?.title || "",
         cover: post?.cover || "",
         desc: post?.content || post?.desc || "",
-        author: post?.author?.name || tr("吃瓜"),
+        author: post?.author?.name || "",
         authorId: post?.author?.id || -1,
         tags: post?.tags || [],
         score: 0,
@@ -326,7 +326,7 @@ export default function Feed({
         title: detail?.title || "",
         cover: detail?.cover?.trim() || "",
         desc: detail?.description || "",
-        author: detail?.author?.name || "HGhubX",
+        author: detail?.author?.name || "",
         authorId: detail?.author?.id || -1,
         tags: detail?.tags || [],
         score: detail?.score || 0,
@@ -413,7 +413,7 @@ export default function Feed({
 
   /* 相关推荐只在用户打开详情时拉取，避免和首播抢占网络。 */
   useEffect(() => {
-    if (!active || !curId || kind !== "video" || !allowed || panel !== "detail" || relatedByVideo[relatedKey]) return;
+    if (!active || !curId || kind !== "video" || !allowed || !capabilities.detail.related || panel !== "detail" || relatedByVideo[relatedKey]) return;
     const id = curId;
     api.related(id).then((r) => {
       if (mounted.current) setRelatedByVideo(previous => ({ ...previous, [relatedKey]: r?.items || [] }));
@@ -563,8 +563,8 @@ export default function Feed({
         case "m": case "M": setMuted((v) => !v); break;
         case "l": case "L": void onLike(); break;
         case "s": case "S": void onFav(); break;
-        case "c": case "C": setPanel("comments"); break;
-        case "e": case "E": if (kind === "video") setPanel("episodes"); break;
+        case "c": case "C": if (capabilities.detail.comments) setPanel("comments"); break;
+        case "e": case "E": if (kind === "video" && capabilities.detail.episodes) setPanel("episodes"); break;
         default: break;
       }
     };
@@ -746,10 +746,10 @@ export default function Feed({
       <FeedMobileTopTools
         isDesktop={isDesktop} controlsLocked={controlsLocked} active={active && !searching} fs={fs} idle={idle}
         rotated={rotated} clean={clean} currentQuality={playUrl ? (preferHevc && hevcUrl && playUrl === hevcUrl ? "HD" : "SD") : null}
-        searchLabel={kind === "post" ? tr("搜吃瓜帖") : tr("搜短剧")}
-        onSearch={mode === "context" ? () => { closePanels(); setSearching(true); } : undefined}
+        searchLabel={kind === "post" ? tr("搜帖子") : tr("搜视频")}
+        onSearch={mode === "context" && capabilities.search ? () => { closePanels(); setSearching(true); } : undefined}
       />
-      {searching && mode === "context" && active && (
+      {searching && mode === "context" && active && capabilities.search && (
         <InplaceSearch kind={kind} wide={isDesktop} onClose={() => setSearching(false)}
           onOpenVideo={(v, list, kw) => store.push({ kind: "feed", videoIds: list.map(x => x.id), index: list.findIndex(x => x.id === v.id), title: kw ? tr("搜索 · {0}", kw) : tr("搜索") })}
           onOpenPost={(p) => store.push({ kind: "post", id: p.id })} />

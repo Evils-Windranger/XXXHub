@@ -44,20 +44,20 @@ try {
   await page.getByRole("button", { name: "我的收藏", exact: true }).waitFor();
   const filterButton = page.locator('[aria-label="收藏状态筛选"] button[aria-haspopup="menu"]');
   await filterButton.waitFor();
-  const menu = page.getByRole("menu", { name: "追剧状态" });
+  const menu = page.getByRole("menu", { name: "观看状态" });
   const activeLabel = page.locator(".ios-filter-active-label");
 
   await filterButton.click();
   await menu.waitFor();
-  await page.getByRole("menuitemradio", { name: /在追剧/ }).click();
+  await page.getByRole("menuitemradio", { name: /未看完/ }).click();
   await menu.waitFor({ state: "detached" });
-  await page.waitForFunction(() => document.querySelector(".ios-filter-active-label")?.textContent?.startsWith("在追剧"));
+  await page.waitForFunction(() => document.querySelector(".ios-filter-active-label")?.textContent?.startsWith("未看完"));
   await page.screenshot({ path: fileURLToPath(new URL("profile-filter-active.png", output)), animations: "disabled" });
 
   // The old bug: re-opening the filter menu from the active pill reset to all.
   await filterButton.click();
   await menu.waitFor();
-  assert.match(await activeLabel.innerText(), /^在追剧 \d+$/);
+  assert.match(await activeLabel.innerText(), /^未看完 \d+$/);
   await page.screenshot({ path: fileURLToPath(new URL("profile-filter-reopen.png", output)), animations: "disabled" });
   await page.keyboard.press("Escape");
   await menu.waitFor({ state: "detached" });

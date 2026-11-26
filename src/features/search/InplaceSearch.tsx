@@ -16,10 +16,9 @@ import { registerOverlayBack } from "../../shared/lib/back";
 import { tr } from "../../shared/i18n";
 
 /** 栏目内搜索保持自身范围；与全局搜索共用请求、缓存和失败恢复逻辑。 */
-export function InplaceSearch({ kind, postLabel = tr("吃瓜帖"), scope, onOpenVideo, onOpenPost, onClose, wide }: {
+export function InplaceSearch({ kind, postLabel = tr("帖子"), onOpenVideo, onOpenPost, onClose, wide }: {
   kind: "video" | "post";
   postLabel?: string;
-  scope?: "original";
   onOpenVideo?: (v: VideoCard, list: VideoCard[], keyword: string) => void;
   onOpenPost?: (p: Post) => void;
   onClose: () => void;
@@ -34,7 +33,7 @@ export function InplaceSearch({ kind, postLabel = tr("吃瓜帖"), scope, onOpen
   const sentinelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
-  const results = useSearchResults(scope);
+  const results = useSearchResults();
   const { result, request, loading, error } = results;
   useAutoLoadMore({
     scrollRef,
@@ -47,14 +46,13 @@ export function InplaceSearch({ kind, postLabel = tr("吃瓜帖"), scope, onOpen
   const items = result?.kind === "video" ? result.items as VideoCard[] : [];
   const posts = result?.kind === "post" ? result.items as Post[] : [];
   const count = result?.items.length ?? 0;
-  const videoLabel = scope === "original" ? tr("原创") : tr("短剧");
-  const label = kind === "post" ? postLabel : videoLabel;
+  const label = kind === "post" ? postLabel : tr("视频");
   useDialogFocusTrap(true, rootRef, onClose);
   const submit = (keyword: string) => {
     const trimmed = keyword.trim();
     if (!trimmed) return;
     setQ(trimmed); setSubmitted(trimmed);
-    if (!scope) addSearch(trimmed);
+    addSearch(trimmed);
     results.search(trimmed, kind);
   };
 
@@ -92,7 +90,7 @@ export function InplaceSearch({ kind, postLabel = tr("吃瓜帖"), scope, onOpen
 
       <div ref={scrollRef} className="flex-1 scroll-y pt-3.5 pb-8">
         {!submitted ? (
-          !scope && searchHist.length > 0 ? (
+          searchHist.length > 0 ? (
             <div className="mt-1 a-rise">
               <SearchHistory items={searchHist} onPick={submit} onRemove={removeSearch} onClear={clearSearchHist} />
             </div>
@@ -109,12 +107,12 @@ export function InplaceSearch({ kind, postLabel = tr("吃瓜帖"), scope, onOpen
           <section aria-label={tr("栏目搜索结果")} aria-busy={loading}>
             {result && count > 0 ? <>
               {kind === "post" ? (
-                <FilteredContent items={posts} scopeKey={JSON.stringify([submitted, kind, scope, result.keyword, result.kind])}>{visible => <div className={`ios-media-grid ${wide ? "is-wide" : ""}`}>
+                <FilteredContent items={posts} scopeKey={JSON.stringify([submitted, kind, result.keyword, result.kind])}>{visible => <div className={`ios-media-grid ${wide ? "is-wide" : ""}`}>
                   {visible.map((post) => (
                     <MediaCard key={post.id} title={post.title} cover={post.cover} subtitle={tr("{0} 次浏览", fmt(post.hot))} onOpen={() => onOpenPost?.(post)} />
                   ))}
                 </div>}</FilteredContent>
-              ) : <Masonry videos={items} scopeKey={JSON.stringify([submitted, kind, scope, result.keyword, result.kind])} wide={wide} onOpen={(v, visible) => onOpenVideo?.(v, visible, result.keyword)} />}
+              ) : <Masonry videos={items} scopeKey={JSON.stringify([submitted, kind, result.keyword, result.kind])} wide={wide} onOpen={(v, visible) => onOpenVideo?.(v, visible, result.keyword)} />}
             </> : loading ? <div className="flex justify-center py-12"><Loader label={tr("正在搜索")} className="w-8 h-8 spinner" /></div>
               : !error && <Empty icon={<ISearch size={26} />}
                 title={result && result.page < result.pages ? tr("已加载页面没有匹配内容") : tr("没有找到相关内容")}

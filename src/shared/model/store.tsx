@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { api, platform as envPlatform } from "../api/api";
+import { api, platform as envPlatform, type InstalledSourceSummary, type SourceStateSnapshot } from "../api/api";
 import { exitDocumentFullscreen, getFullscreenElement } from "../lib/fullscreen";
 import { setSiteOrigin } from "../lib/html";
 import { isStrictSecurity, setStrictSecurity as setHtmlStrictSecurity } from "../lib/securityMode";
@@ -78,7 +78,7 @@ type Persist = GuestData & {
   muteOnStartup: boolean;
   volume: number;
   searchHist: string[];
-  /** 上下划切集：多集短剧上下滑就换集，而不是换下一部 */
+  /** 上下划切集：多集视频上下滑就换集，而不是换下一部 */
   swipeEp: boolean;
   /** 优先高清：有 HEVC 就用 HEVC，播不了自动回退标准 */
   preferHevc: boolean;
@@ -230,6 +230,44 @@ type Store = {
   toasts: Toast[]; toast: (msg: string, icon?: Toast["icon"], tag?: string) => void;
   /** 线路切换计数：变了就让列表页重挂载，重新拉一遍数据 */
   lineEpoch: number;
+  sourceState: SourceStateSnapshot | null | "unsupported";
+  sourceStateStatus: "loading" | "ready" | "unsupported";
+  activeSource: InstalledSourceSummary | null;
+  capabilities: ResolvedSourceCapabilities;
+  refreshSourceState: () => void;
+};
+
+export type ResolvedSourceCapabilities = {
+  home: boolean;
+  search: boolean;
+  catalog: { categories: boolean; tags: boolean; rankings: boolean; authors: boolean };
+  detail: { episodes: boolean; related: boolean; comments: boolean };
+  playback: { hls: boolean; mp4: boolean; subtitles: boolean };
+  posts: boolean;
+  account: boolean;
+  lines: boolean;
+};
+
+const ALL_CAPABILITIES: ResolvedSourceCapabilities = {
+  home: true,
+  search: true,
+  catalog: { categories: true, tags: true, rankings: true, authors: true },
+  detail: { episodes: true, related: true, comments: true },
+  playback: { hls: true, mp4: true, subtitles: true },
+  posts: true,
+  account: true,
+  lines: true,
+};
+
+const NO_CAPABILITIES: ResolvedSourceCapabilities = {
+  home: false,
+  search: false,
+  catalog: { categories: false, tags: false, rankings: false, authors: false },
+  detail: { episodes: false, related: false, comments: false },
+  playback: { hls: false, mp4: false, subtitles: false },
+  posts: false,
+  account: false,
+  lines: false,
 };
 
 const Ctx = createContext<Store>(null as unknown as Store);
@@ -353,6 +391,87 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [cliRelaxed, setCliRelaxed] = useState(false);
   const [strictSecurityReady, setStrictSecurityReady] = useState(false);
   const [securityPending, setSecurityPending] = useState(false);
+  const [sourceState, setSourceState] = useState<SourceStateSnapshot | null | "unsupported">(null);
+  const sourceReqRef = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const refreshSourceState = useCallback(() => {
+    const req = ++sourceReqRef.current;
+    void api.sourceState()
+      .then((snap) => {
+        if (!mountedRef.current || req !== sourceReqRef.current) return;
+        if (snap && typeof snap === "object" && Array.isArray(snap.sources)) {
+          setSourceState(snap);
+        } else {
+          setSourceState("unsupported");
+        }
+      })
+      .catch(() => {
+        if (!mountedRef.current || req !== sourceReqRef.current) return;
+        setSourceState("unsupported");
+      });
+  }, []);
+
+  useEffect(() => {
+    refreshSourceState();
+    window.addEventListener("hg:source-changed", refreshSourceState);
+    return () => window.removeEventListener("hg:source-changed", refreshSourceState);
+  }, [refreshSourceState]);
+
+  const sourceStateStatus: "loading" | "ready" | "unsupported" =
+    sourceState === null ? "loading" : sourceState === "unsupported" ? "unsupported" : "ready";
+
+  const activeSource = useMemo<InstalledSourceSummary | null>(() => {
+    if (!sourceState || sourceState === "unsupported") return null;
+    return (
+      sourceState.sources.find((s) => s.active) ??
+      (sourceState.activeSourceId
+        ? sourceState.sources.find((s) => s.id === sourceState.activeSourceId) ?? null
+        : null)
+    );
+  }, [sourceState]);
+
+  const capabilities = useMemo<ResolvedSourceCapabilities>(() => {
+    if (sourceState === null || sourceState === "unsupported") return ALL_CAPABILITIES;
+    if (!activeSource) return NO_CAPABILITIES;
+    const c = activeSource.capabilities;
+    return {
+      home: !!c.home,
+      search: !!c.search,
+      catalog: {
+        categories: !!c.catalog?.categories,
+        tags: !!c.catalog?.tags,
+        rankings: !!c.catalog?.rankings,
+        authors: !!c.catalog?.authors,
+      },
+      detail: {
+        episodes: !!c.detail?.episodes,
+        related: !!c.detail?.related,
+        comments: !!c.detail?.comments,
+      },
+      playback: {
+        hls: !!c.playback?.hls,
+        mp4: !!c.playback?.mp4,
+        subtitles: !!c.playback?.subtitles,
+      },
+      posts: !!c.posts,
+      account: !!c.account,
+      lines: !!c.lines,
+    };
+  }, [sourceState, activeSource]);
+
+  const prevSourceIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const nextId = activeSource?.id ?? null;
+    if (prevSourceIdRef.current !== null && prevSourceIdRef.current !== nextId) {
+      setStack([]);
+    }
+    prevSourceIdRef.current = nextId;
+  }, [activeSource?.id]);
 
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
@@ -410,10 +529,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const changed = () => { readBoot(); };
     window.addEventListener("hg:line-changed", changed);
     window.addEventListener("hg:proxy-changed", changed);
+    window.addEventListener("hg:source-changed", changed);
     return () => {
       active = false;
       window.removeEventListener("hg:line-changed", changed);
       window.removeEventListener("hg:proxy-changed", changed);
+      window.removeEventListener("hg:source-changed", changed);
     };
   }, []);
 
@@ -442,7 +563,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener("hg:line", onLine);
     return () => window.removeEventListener("hg:line", onLine);
   }, []);
-  /** 自动选线：主站和发布页上的镜像全都不通。
+  /** 自动选线：默认线路与备选线路全都不通。
    *
    * 只说一次（60s 节流）——巡检本身 10s 一轮，不节流会一直弹。
    * 以前这种情况会悄悄切到 `.ai`（接口全 404），用户只看到「加载失败」，
@@ -468,9 +589,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const bump = () => setLineEpoch((n) => n + 1);
     window.addEventListener("hg:line-changed", bump);
     window.addEventListener("hg:proxy-changed", bump);
+    window.addEventListener("hg:source-changed", bump);
     return () => {
       window.removeEventListener("hg:line-changed", bump);
       window.removeEventListener("hg:proxy-changed", bump);
+      window.removeEventListener("hg:source-changed", bump);
     };
   }, []);
 
@@ -616,10 +739,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     searchHist: p.searchHist, addSearch, removeSearch, clearSearchHist,
     strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity,
     get toasts() { return toastList; }, toast, lineEpoch,
+    sourceState, sourceStateStatus, activeSource, capabilities, refreshSourceState,
   }), [theme, themePreference, setTheme, tab, setTab, stack, push, openRootPage, pop, user, loginOpen, logout,
     p, account,
     setMuted, setMuteOnStartup, setSwipeEp, setPreferHevc, setBalanceVolume, setFsIdleSecs, setStartupTab, setAmbientGlow, setVolume, addSearch, removeSearch, clearSearchHist, strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity,
-    toast, lineEpoch, theater, setTheater, fs, setFs, clean, setClean, locked, setLocked]);
+    toast, lineEpoch, sourceState, sourceStateStatus, activeSource, capabilities, refreshSourceState, theater, setTheater, fs, setFs, clean, setClean, locked, setLocked]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

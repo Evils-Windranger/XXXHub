@@ -13,35 +13,53 @@ const BATCH_SIZE = 7;
 
 /** Popular authors on the search landing page, with hold-to-follow author chips. */
 export function SearchAuthors({ active }: { active: boolean }) {
-  const { push, lineEpoch, follows } = useStore();
+  const { push, lineEpoch, follows, activeSource, sourceStateStatus, capabilities } = useStore();
   const { busyId, toggleFollow } = useAuthorFollow();
   const [authors, setAuthors] = useState<AuthorItem[] | null>(null);
+  const [supported, setSupported] = useState(true);
   const [batch, setBatch] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const sequence = useRef(0);
   const loadedKey = useRef("");
+  const canAuthors = sourceStateStatus !== "ready" || capabilities.catalog.authors;
+  const cacheKey = `${activeSource?.id ?? "default"}:${lineEpoch}`;
 
   const load = useCallback(async (force = false) => {
+    if (!canAuthors) {
+      setSupported(false);
+      setAuthors([]);
+      return;
+    }
     const token = ++sequence.current;
     setLoading(true);
     setError("");
     try {
-      const directory = await loadAuthors(lineEpoch, force);
+      const directory = await loadAuthors(cacheKey, force);
       if (sequence.current !== token) return;
+      setSupported(directory.supported);
       setAuthors(directory.items);
       setBatch(0);
-      loadedKey.current = String(lineEpoch);
+      loadedKey.current = cacheKey;
     } catch (cause) {
       if (sequence.current === token) setError(cause instanceof Error ? cause.message : tr("作者加载失败，请重试"));
     } finally {
       if (sequence.current === token) setLoading(false);
     }
-  }, [lineEpoch]);
+  }, [cacheKey, canAuthors]);
 
-  useEffect(() => { if (active && loadedKey.current !== String(lineEpoch)) void load(); }, [active, lineEpoch, load]);
-  useEffect(() => subscribeAuthors(directory => setAuthors(directory.items)), []);
+  useEffect(() => {
+    if (!canAuthors) { setSupported(false); return; }
+    if (active && loadedKey.current !== cacheKey) void load();
+  }, [active, cacheKey, canAuthors, load]);
+  useEffect(() => subscribeAuthors((directory, key) => {
+    if (key !== cacheKey) return;
+    setSupported(directory.supported);
+    setAuthors(directory.items);
+  }), [cacheKey]);
   useEffect(() => () => { sequence.current++; }, []);
+
+  if (!canAuthors || !supported) return null;
 
   const openAuthor = (author: AuthorItem) => push({ kind: "user", id: author.id, name: author.name });
   const isFollowing = (id: number) => follows.includes(id);

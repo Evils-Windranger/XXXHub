@@ -30,7 +30,14 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
   const locale = useLocale();
   const hapticLevel = useHapticLevel();
   const [localeBusy, setLocaleBusy] = useState(false);
-  const { theme, themePreference, setTheme, favs, history, muteOnStartup, setMuteOnStartup, preferHevc, setPreferHevc, balanceVolume, setBalanceVolume, fsIdleSecs, setFsIdleSecs, startupTab, setStartupTab, ambientGlow, setAmbientGlow, strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity, toast } = useStore();
+  const { theme, themePreference, setTheme, favs, history, muteOnStartup, setMuteOnStartup, preferHevc, setPreferHevc, balanceVolume, setBalanceVolume, fsIdleSecs, setFsIdleSecs, startupTab, setStartupTab, ambientGlow, setAmbientGlow, strictSecurity, strictSecurityReady, securityPending, cliRelaxed, setStrictSecurity, toast, capabilities, activeSource } = useStore();
+  const canCategory = capabilities.catalog.categories || capabilities.catalog.tags || capabilities.catalog.rankings || capabilities.catalog.authors || capabilities.posts || Boolean(activeSource?.catalog?.channels?.some((c) => (c.kind === "post" ? capabilities.posts : capabilities.catalog.categories)));
+  const startupTabs = ([
+    ...(capabilities.home ? [["home", tr("首页")] as const] : []),
+    ...(capabilities.search ? [["search", tr("搜索")] as const] : []),
+    ...(canCategory ? [["category", tr("分类")] as const] : []),
+    ["profile", tr("我的")] as const,
+  ]);
   const [about, setAbout] = useState(false);
   const [agreementOpen, setAgreementOpen] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
@@ -90,7 +97,7 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
   const formatCacheBytes = (bytes: number) => bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB` : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : "0 KB";
   const cacheLimitMb = Math.round((cacheInfo?.limitBytes ?? 120 * 1024 * 1024) / (1024 * 1024));
   useEffect(() => {
-    const sync = () => { readLine(); readSource(); refreshPeers(); readCache(); setAutoLineOn(autoLineEnabled()); };
+    const sync = () => { if (capabilities.lines) readLine(); readSource(); refreshPeers(); readCache(); setAutoLineOn(autoLineEnabled()); };
     sync();
     window.addEventListener("hg:line-changed", sync);
     window.addEventListener("hg:auto-line-changed", sync);
@@ -100,7 +107,7 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
       window.removeEventListener("hg:auto-line-changed", sync);
       window.removeEventListener("hg:source-changed", sync);
     };
-  }, []);
+  }, [capabilities.lines]);
 
   const checkUpdate = async () => {
     if (checking) return;
@@ -210,8 +217,8 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
                 <div className="text-[14px] text-on">{tr("启动时打开的页面")}</div>
                 <div className="text-[12px] text-mut">{tr("下次启动生效；选非首页可避免开机自动播放、打乱观看历史")}</div>
               </div>
-              <SegmentedControl className="w-full" aria-label={tr("启动时打开的页面")} activeIndex={(["home", "search", "category", "profile"] as const).indexOf(startupTab)}>
-                {([["home", tr("首页")], ["search", tr("搜索")], ["category", tr("分类")], ["profile", tr("我的")]] as const).map(([value, label]) => (
+              <SegmentedControl className="w-full" aria-label={tr("启动时打开的页面")} activeIndex={Math.max(0, startupTabs.findIndex(([value]) => value === startupTab))}>
+                {startupTabs.map(([value, label]) => (
                   <Button key={value} type="button" aria-pressed={startupTab === value} onClick={() => setStartupTab(value)}>{label}</Button>
                 ))}
               </SegmentedControl>
@@ -286,14 +293,16 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
 
           {section(N_("网络"), <>
             <ProxySettings />
-            <Button onClick={() => setLineOpen(true)} className="ios-settings-row text-left pressable">
-              <span className="ios-setting-icon"><IBoltF size={16} /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">{tr("播放源")}</div>
-                <div className="text-[12px] text-mut truncate">{lineError || (lineBase ? hostOf(lineBase) : lineLoaded ? tr("未设置") : tr("读取中…"))}</div>
-              </div>
-              <IChevR size={15} className="text-mut" />
-            </Button>
+            {capabilities.lines && (
+              <Button onClick={() => setLineOpen(true)} className="ios-settings-row text-left pressable">
+                <span className="ios-setting-icon"><IBoltF size={16} /></span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] text-on">{tr("播放源")}</div>
+                  <div className="text-[12px] text-mut truncate">{lineError || (lineBase ? hostOf(lineBase) : lineLoaded ? tr("未设置") : tr("读取中…"))}</div>
+                </div>
+                <IChevR size={15} className="text-mut" />
+              </Button>
+            )}
             <Button onClick={() => setSourceOpen(true)} className="ios-settings-row text-left pressable">
               <span className="ios-setting-icon"><ILink size={16} /></span>
               <div className="flex-1 min-w-0">
@@ -310,18 +319,20 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
               </div>
               <IChevR size={15} className="text-mut" />
             </Button>
-            <div className="ios-settings-row">
-              <span className="ios-setting-icon"><IRefresh size={15} /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-on">{tr("自动选择线路")}</div>
-                <div className="text-[12px] text-mut">{tr("主站不可用时检测已发布镜像；关闭后保留手动选择")}</div>
+            {capabilities.lines && (
+              <div className="ios-settings-row">
+                <span className="ios-setting-icon"><IRefresh size={15} /></span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] text-on">{tr("自动选择线路")}</div>
+                  <div className="text-[12px] text-mut">{tr("默认线路不可用时检测备选线路；关闭后保留手动选择")}</div>
+                </div>
+                <Toggle desktop label={tr("自动选择线路")} on={autoLineOn} onChange={(on) => {
+                  void setAutoLine(on).catch(() => toast(tr("自动选线暂停失败，请重试"), "info"));
+                  setAutoLineOn(on);
+                  toast(on ? tr("已开启自动选择线路") : tr("已关闭自动选线，可手动选择播放源"), "info");
+                }} />
               </div>
-              <Toggle desktop label={tr("自动选择线路")} on={autoLineOn} onChange={(on) => {
-                void setAutoLine(on).catch(() => toast(tr("自动选线暂停失败，请重试"), "info"));
-                setAutoLineOn(on);
-                toast(on ? tr("已开启自动选择线路") : tr("已关闭自动选线，可手动选择播放源"), "info");
-              }} />
-            </div>
+            )}
             <div className="ios-settings-row">
               <span className="ios-setting-icon"><ILockF size={15} /></span>
               <div className="flex-1 min-w-0">
@@ -377,7 +388,7 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
               <span className="ios-setting-icon"><ILink size={16} /></span>
               <div className="flex-1">
                 <div className="text-[14px] text-on">{diagnosing ? tr("正在诊断…") : tr("网络诊断")}</div>
-                <div className="text-[12px] text-mut">{tr("DNS / TCP / 系统代理 / 官网连通性，一键复制带结论的报告")}</div>
+                <div className="text-[12px] text-mut">{tr("DNS / TCP / 系统代理 / 源站连通性，一键复制带结论的报告")}</div>
               </div>
               <IChevR size={15} className="text-mut" />
             </Button>
@@ -440,7 +451,7 @@ export default function Settings({ onBack, initialSection }: { onBack: () => voi
         </div>
       </div>
 
-      <LinePicker open={lineOpen} onClose={() => { setLineOpen(false); readLine(); }} />
+      {capabilities.lines && <LinePicker open={lineOpen} onClose={() => { setLineOpen(false); readLine(); }} />}
       <SourceManager open={sourceOpen} onClose={() => { setSourceOpen(false); readSource(); }} />
       <TvQrSyncModal open={qrOpen} initialView={pairedCount > 0 ? "hub" : "scan"} onClose={() => { setQrOpen(false); readSource(); refreshPeers(); }} onSuccess={() => { readSource(); refreshPeers(); }} />
 

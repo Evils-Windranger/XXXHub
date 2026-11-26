@@ -49,6 +49,8 @@ pub struct CatalogCapabilities {
     pub tags: bool,
     #[serde(default)]
     pub rankings: bool,
+    #[serde(default)]
+    pub authors: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -109,6 +111,31 @@ pub struct SourceMediaConfig {
     pub image_decrypt: Option<ImageDecryptConfig>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogChannel {
+    pub id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sorts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceCatalogConfig {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub channels: Vec<CatalogChannel>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceLinksConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_id_path_pattern: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceManifest {
@@ -128,6 +155,10 @@ pub struct SourceManifest {
     pub capabilities: SourceCapabilities,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media: Option<SourceMediaConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog: Option<SourceCatalogConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub links: Option<SourceLinksConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -291,6 +322,36 @@ pub fn validate_package(pkg: &SourcePackage) -> Result<(), String> {
     validate_origin_list("updateUrls", &pkg.update_urls, MAX_UPDATE_URLS)?;
     if let Some(dec) = pkg.manifest.media.as_ref().and_then(|m| m.image_decrypt.as_ref()) {
         parse_image_decrypt_bytes(dec)?;
+    }
+    if let Some(cat) = pkg.manifest.catalog.as_ref() {
+        if cat.channels.len() > 24 {
+            return Err("catalog.channels 数量超出限制（最多 24 个）".into());
+        }
+        for ch in &cat.channels {
+            let ch_id = ch.id.trim();
+            let ch_label = ch.label.trim();
+            if ch_id.is_empty()
+                || ch_id.chars().count() > 64
+                || ch_label.is_empty()
+                || ch_label.chars().count() > 64
+                || ch_label.contains('<')
+                || ch_label.contains('>')
+            {
+                return Err("catalog.channels 条目无效（id 与 label 不能为空、不超过 64 字符且不含 HTML 标签）".into());
+            }
+            if ch.sorts.len() > 16
+                || ch.sorts.iter().any(|s| s.trim().is_empty() || s.chars().count() > 32)
+            {
+                return Err("catalog.channels.sorts 条目无效".into());
+            }
+        }
+    }
+    if let Some(links) = pkg.manifest.links.as_ref() {
+        if let Some(pat) = links.video_id_path_pattern.as_deref() {
+            if pat.trim().is_empty() || pat.len() > 128 {
+                return Err("links.videoIdPathPattern 长度无效（需为 1~128 字符）".into());
+            }
+        }
     }
     Ok(())
 }

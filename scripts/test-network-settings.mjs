@@ -47,6 +47,36 @@ try {
       Object.assign(window, { isTauri: true, networkSettingsFixture: fixture, __TAURI_INTERNALS__: { async invoke(command, args = {}) {
         fixture.calls.push({ command, args });
         if (command === "app_boot") return { strict_security: true, base: fixture.base, logged_in: fixture.loggedIn, user: fixture.loggedIn ? user : null };
+        if (command === "source_state") return {
+          activeSourceId: "fixture-source",
+          allowUntrusted: true,
+          sources: [{
+            id: "fixture-source",
+            name: "Fixture Source",
+            version: "1.0.0",
+            description: "Settings fixture source",
+            author: "Fixture",
+            apiVersion: "1",
+            runtimeKind: "quickjs",
+            origins: [MAIN, "https://published.fixture.invalid"],
+            capabilities: {
+              home: true,
+              search: true,
+              catalog: { categories: true, tags: true, rankings: true, authors: true },
+              detail: { episodes: true, related: true, comments: true },
+              playback: { hls: true, mp4: true, subtitles: true },
+              posts: true,
+              account: true,
+              lines: true,
+            },
+            updateUrls: [],
+            signature: { status: "unsigned", keyId: "", fingerprint: "" },
+            installedAt: 0,
+            active: true,
+          }],
+        };
+        if (command === "tv_peer_list") return [];
+        if (command === "cache_stats") return { usedBytes: 0, limitBytes: 125829120, imageCount: 0, segmentCount: 0, playlistCount: 0 };
         if (command === "api_me") return { user, interactions, origin: fixture.base };
         if (command === "api_account_history") return { items: [], pagination: { page: args.page, pages: 1, size: args.size, total: 0 } };
         if (command === "debug_log" || command === "playback_log_write" || command === "line_cancel") return;
@@ -123,7 +153,7 @@ try {
     assert.equal(await page.evaluate(() => window.lineSelectionControls.autoLineEnabled()), false);
     assert.equal(await page.evaluate(() => window.lineSelectionSnapshot.user), null);
     assert.equal(await input.inputValue(), "https://custom.fixture.invalid");
-    await dialog.getByRole("button", { name: "恢复主站" }).click();
+    await dialog.getByRole("button", { name: "恢复默认" }).click();
     await page.waitForFunction(() => window.networkSettingsFixture.base === "https://main.fixture.invalid");
     assert.equal(await input.inputValue(), "");
     assert.equal((await calls(page, "line_reset")).length, 1);

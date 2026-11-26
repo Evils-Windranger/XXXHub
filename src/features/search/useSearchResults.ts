@@ -17,7 +17,7 @@ const CACHE_LIMIT = 8;
 const CACHE_ITEMS = 200;
 
 /** Keep query identity together with its cards so pending searches never relabel old content. */
-export function useSearchResults(scope?: "original") {
+export function useSearchResults() {
   const { lineEpoch, accountScope } = useStore();
   const { preferences, blockReason } = useContentPreferences();
   const filtering = !preferences.paused && (preferences.blockedTags.length > 0 || preferences.hideUntagged);
@@ -49,7 +49,7 @@ export function useSearchResults(scope?: "original") {
     setRequest(next);
     setError(null);
     if (next.page === 1) setEmptyStreak(0);
-    const key = JSON.stringify([envKey, scope, next.kind, next.keyword]);
+    const key = JSON.stringify([envKey, next.kind, next.keyword]);
     const cached = cache.current.get(key);
     if (reuse && cached && Date.now() - cached.at < CACHE_TTL) {
       publish(cached.result);
@@ -68,16 +68,15 @@ export function useSearchResults(scope?: "original") {
       const old = current.current;
       const base = next.page > 1 && old?.keyword === next.keyword && old.kind === next.kind ? old.items : [];
       const seen = new Set(base.map(item => item.id));
-      const rawItems = response?.items || [];
-      const incoming = rawItems.filter(item => !(scope === "original" && next.kind === "video") || item.is_original === 1);
+      const incoming = response?.items || [];
       const uniqueIncoming = incoming.filter(item => {
         if (seen.has(item.id)) return false;
         seen.add(item.id);
         return true;
       });
       const items = [...base, ...uniqueIncoming];
-      if ((filteringRef.current || scope === "original") && rawItems.length > 0) {
-        const visibleCount = uniqueIncoming.filter(item => !filteringRef.current || !blockReasonRef.current(item.tags)).length;
+      if (filteringRef.current && incoming.length > 0) {
+        const visibleCount = uniqueIncoming.filter(item => !blockReasonRef.current(item.tags)).length;
         setEmptyStreak(prev => (visibleCount > 0 ? 0 : (next.page === 1 ? 1 : prev + 1)));
       } else {
         setEmptyStreak(0);
@@ -85,7 +84,7 @@ export function useSearchResults(scope?: "original") {
       const total = response?.pagination?.total;
       const value: Result = { keyword: next.keyword, kind: next.kind, items, page: next.page,
         pages: Math.max(next.page, response?.pagination?.pages || next.page),
-        total: scope === "original" || !Number.isFinite(total) || total < items.length ? null : total };
+        total: !Number.isFinite(total) || total < items.length ? null : total };
       publish(value);
       cache.current.delete(key);
       if (items.length <= CACHE_ITEMS) cache.current.set(key, { result: value, at: Date.now() });
@@ -121,6 +120,6 @@ export function useSearchResults(scope?: "original") {
     if (attempt.current) void run({ ...attempt.current, page: 1 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [envKey]);
-  const autoLoadPaused = (filtering || scope === "original") && emptyStreak >= AUTO_LOAD_EMPTY_PAGE_LIMIT;
+  const autoLoadPaused = filtering && emptyStreak >= AUTO_LOAD_EMPTY_PAGE_LIMIT;
   return { result, request, loading, error, autoLoadPaused, search, loadMore, retry, clear };
 }

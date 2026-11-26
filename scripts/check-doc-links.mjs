@@ -21,7 +21,6 @@ const files = [
   path.join(root, "README.md"),
   path.join(root, "AGENTS.md"),
   path.join(root, "CLAUDE.md"),
-  path.join(root, "rules", "README.md"),
   ...markdownFiles(path.join(root, "docs")),
 ].filter((file) => fs.existsSync(file));
 

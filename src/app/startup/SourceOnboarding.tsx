@@ -110,7 +110,7 @@ export default function SourceOnboarding({
             </div>
             <TextArea
               aria-label={tr("导入视频源")}
-              placeholder={tr("链接 / npm:包名 / JSON")}
+              placeholder={tr("链接 / hghubx-src:// 口令 / JSON")}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               className="w-full h-24 p-3 rounded-(--r-sm) bg-s3 text-[12px] text-on font-mono resize-none"

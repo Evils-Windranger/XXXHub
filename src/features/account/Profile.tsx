@@ -29,6 +29,7 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
     user, setLoginOpen, logout, history, favs, postFavs, favEpCounts,
     seedFavoriteEpisodes, ackFavoriteEpisodes, setCollected, toast,
     clearHistory, removeHistory, push, accountSync, syncAccount, accountGeneration,
+    capabilities, setTab: setAppTab,
   } = useStore();
   const [tab, setTab] = useState<"fav" | "history">("fav");
   const [scanOpen, setScanOpen] = useState(false);
@@ -113,7 +114,11 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
     setFilterMenuOpen(false);
   }, [tab, favKind]);
 
-  const showingPosts = tab === "fav" && favKind === "post";
+  useEffect(() => {
+    if (!capabilities.posts && favKind === "post") setFavKind("video");
+  }, [capabilities.posts, favKind]);
+
+  const showingPosts = capabilities.posts && tab === "fav" && favKind === "post";
   const refreshFavorites = tab === "fav" && !showingPosts;
   const selectionMode = selectedIds.length > 0;
   const limitKey = tab === "history" ? "history" : showingPosts ? "favPost" : "favVideo";
@@ -129,7 +134,7 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
     ongoing: filterFavoriteVideoIds(favs, videoCache, "ongoing", favoriteHasUnwatched).length,
     finished: filterFavoriteVideoIds(favs, videoCache, "finished", favoriteHasUnwatched).length,
   }), [favs, videoCache, history, favEpCounts]);
-  const activeFavoriteFilterLabel = favFilter === "unwatched" ? tr("在追剧")
+  const activeFavoriteFilterLabel = favFilter === "unwatched" ? tr("未看完")
     : favFilter === "ongoing" ? tr("连载中") : favFilter === "finished" ? tr("已完结") : "";
   const activeFavoriteFilterCount = favFilter === "unwatched" ? favoriteFilterCounts.unwatched
     : favFilter === "ongoing" ? favoriteFilterCounts.ongoing
@@ -372,7 +377,7 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
               <span className="whitespace-nowrap">{tr("关注")}{" "}<b className="text-on">{fmt(user.counts?.following)}</b></span>
             </div>
           </Surface>
-        ) : (
+        ) : capabilities.account ? (
           <Button onClick={() => setLoginOpen(true)}
             className="ios-account-card w-full text-left flex items-center gap-3.5 pressable a-rise">
             <Avatar size={56} icon={<IUser size={26} />} hue={220} ring />
@@ -387,6 +392,18 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
             <span className="inline-flex items-center gap-0.5 h-9 pl-3.5 pr-2.5 rounded-full bg-primary text-on-primary text-[13px] font-semibold shrink-0">{tr("登录")}<IChevR size={14} />
             </span>
           </Button>
+        ) : (
+          <Surface className="ios-account-card w-full text-left flex items-center gap-3.5 a-rise">
+            <Avatar size={56} icon={<IUser size={26} />} hue={220} ring />
+            <div className="flex-1 min-w-0">
+              <div className="text-[16px] font-bold text-on">{tr("本机片库")}</div>
+              <div className="text-[12px] text-mut mt-0.5">{tr("当前视频源仅支持本地收藏与观看记录")}</div>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[12px] text-mut">
+                <span className="whitespace-nowrap">{tr("收藏")}{" "}<b className="text-on">{favs.length + postFavs.length}</b></span>
+                <span className="whitespace-nowrap">{tr("观看")}{" "}<b className="text-on">{history.length}</b></span>
+              </div>
+            </div>
+          </Surface>
         )}
 
         {user && accountSync.error && <div role="alert" className="mt-3 rounded-(--r-sm) bg-s3 px-3.5 py-3 text-[13px] flex flex-wrap items-center justify-between gap-2">
@@ -402,7 +419,7 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
         </div>}
 
         {/* 关注 / 我的主页 */}
-        {user && (
+        {user && capabilities.account && (
           <CollectionLinks className="ios-profile-links mt-4">
             <CollectionLink icon={<IHeart size={18} />} title={tr("我的关注")}
               onClick={() => push({ kind: "following" })} />
@@ -418,11 +435,13 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
           ))}
         </SegmentedControl>
 
-        {tab === "fav" && !favoriteStateUnknown && (favs.length > 0 || postFavs.length > 0 || favKind === "post") && (
+        {tab === "fav" && !favoriteStateUnknown && (favs.length > 0 || (capabilities.posts && (postFavs.length > 0 || favKind === "post"))) && (
           <div className="mt-2.5 flex items-center gap-2" role="group" aria-label={tr("收藏内容类型")}>
             <div className="flex items-center gap-2">
-              <Button aria-pressed={favKind === "video"} onClick={() => { setFavKind("video"); setSelectedIds([]); }} className="ios-filter-pill">{tr("短剧{0}", favs.length ? ` ${favs.length}` : "")}</Button>
-              <Button aria-pressed={favKind === "post"} onClick={() => { setFavKind("post"); setFavFilter("all"); setSelectedIds([]); }} className="ios-filter-pill">{tr("帖子{0}", postFavs.length ? ` ${postFavs.length}` : "")}</Button>
+              <Button aria-pressed={favKind === "video"} onClick={() => { setFavKind("video"); setSelectedIds([]); }} className="ios-filter-pill">{tr("视频{0}", favs.length ? ` ${favs.length}` : "")}</Button>
+              {capabilities.posts && (
+                <Button aria-pressed={favKind === "post"} onClick={() => { setFavKind("post"); setFavFilter("all"); setSelectedIds([]); }} className="ios-filter-pill">{tr("帖子{0}", postFavs.length ? ` ${postFavs.length}` : "")}</Button>
+              )}
             </div>
             {favKind === "video" && favs.length > 0 && (
               <div ref={filterMenuRef} className="relative ml-auto" role="group" aria-label={tr("收藏状态筛选")}>
@@ -437,7 +456,7 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
                   <IFilter size={19} strokeWidth={1.8} />
                 </Button>
                 {filterMenuOpen && (
-                  <div className="ios-filter-menu" role="menu" aria-label={tr("追剧状态")} onKeyDownCapture={event => {
+                  <div className="ios-filter-menu" role="menu" aria-label={tr("观看状态")} onKeyDownCapture={event => {
                     const entries = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
                     const index = entries.indexOf(document.activeElement as HTMLButtonElement);
                     if (event.key === "Escape") {
@@ -452,9 +471,9 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
                       entries[next]?.focus();
                     }
                   }}>
-                    <span className="ios-filter-menu-title">{tr("追剧状态")}</span>
+                    <span className="ios-filter-menu-title">{tr("观看状态")}</span>
                     {([
-                      ["unwatched", tr("在追剧"), favoriteFilterCounts.unwatched],
+                      ["unwatched", tr("未看完"), favoriteFilterCounts.unwatched],
                       ["ongoing", tr("连载中"), favoriteFilterCounts.ongoing],
                       ["finished", tr("已完结"), favoriteFilterCounts.finished],
                     ] as const).map(([key, label, count]) => (
@@ -552,7 +571,7 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
               sub={tr("部分收藏未能加载，筛选结果可能不完整。")} action={tr("重试")} onAction={() => setReload(n => n + 1)} />
           ) : filterEmpty ? (
             <Empty icon={<IStar size={24} />}
-              title={favFilter === "unwatched" ? tr("没有在追的短剧")
+              title={favFilter === "unwatched" ? tr("没有未看完的收藏")
                 : favFilter === "ongoing" ? tr("没有连载中的收藏") : tr("没有已完结的收藏")}
               sub={favFilter === "unwatched" ? tr("当前收藏都已看完。")
                 : favFilter === "ongoing" ? tr("当前收藏都已完结。") : tr("当前收藏里还没有已完结的视频。")}
@@ -563,13 +582,17 @@ function ProfileContent({ wide, active }: { wide: boolean; active: boolean }) {
               sub={tr("记录仍在，重试后继续浏览。")} action={tr("重试")} onAction={() => setReload(n => n + 1)} />
           ) : showingPosts ? (
             <Empty icon={<IStar size={24} />} title={tr("还没有收藏帖子")}
-              sub={tr("在吃瓜页面点收藏，之后就能在这里找到")}
-              action={tr("去看吃瓜")} onAction={() => push({ kind: "posts" })} />
+              sub={tr("在帖子页面点收藏，之后就能在这里找到")}
+              action={tr("去看帖子")} onAction={() => push({ kind: "posts" })} />
           ) : (
             <Empty icon={tab === "fav" ? <IStar size={24} /> : <IClock size={24} />}
               title={tab === "fav" ? tr("还没有收藏") : tr("还没有观看记录")}
-              sub={tab === "fav" ? tr("在剧集页点收藏，之后就能在这里找到") : tr("看过的剧集会出现在这里")}
-              action={tr("去逛逛")} onAction={() => push({ kind: "ranks" })} />
+              sub={tab === "fav" ? tr("在视频页面点收藏，之后就能在这里找到") : tr("看过的视频会出现在这里")}
+              action={capabilities.catalog.rankings || capabilities.home || capabilities.search ? tr("去逛逛") : undefined}
+              onAction={capabilities.catalog.rankings ? () => push({ kind: "ranks" })
+                : capabilities.home ? () => setAppTab("home")
+                : capabilities.search ? () => setAppTab("search")
+                : undefined} />
           )}
           {cardsCount > 0 && (filterFailedIds.length > 0 || failed.length > 0) && <div role="status" className="mt-3 flex flex-wrap items-center gap-2 text-[13px] text-mut">
             <span>{filterFailedIds.length > 0

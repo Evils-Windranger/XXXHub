@@ -7,7 +7,6 @@ mod probe;
 pub use mirror::{
     fixed, is_fixed, is_trusted_mirror, mirrors, trusted_mirrors_snapshot, verify_published_origin,
 };
-pub(crate) use probe::healthy_video_data;
 #[allow(unused_imports)]
 pub use probe::{auto_pick, health, probe, try_main, Hit};
 

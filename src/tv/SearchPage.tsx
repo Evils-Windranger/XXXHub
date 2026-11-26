@@ -10,7 +10,9 @@ const KEYS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".split("");
 type Results = { identity: string; items: TvContent[]; offset: number; hasMore: boolean; total: number; retryable: number; loading: boolean; error: string };
 const initial = (identity: string): Results => ({ identity, items: [], offset: 0, hasMore: false, total: 0, retryable: 0, loading: false, error: "" });
 
-export default function SearchPage({ source, paused, onOpen }: { source: string; paused: boolean; onOpen: (content: TvContent) => void }) {
+export default function SearchPage({ source, paused, allowVideos = true, allowPosts = true, onOpen }: {
+  source: string; paused: boolean; allowVideos?: boolean; allowPosts?: boolean; onOpen: (content: TvContent) => void;
+}) {
   const [query, setQuery] = useState("");
   const [term, setTerm] = useState("");
   const preferences = useContentPreferences();
@@ -24,7 +26,7 @@ export default function SearchPage({ source, paused, onOpen }: { source: string;
   const busy = useRef(false);
   const loadedCount = useRef(-1);
 
-  useEffect(() => { if (source) startCatalog(source); }, [source]);
+  useEffect(() => { if (source) startCatalog(source, { videos: allowVideos, posts: allowPosts }); }, [source, allowVideos, allowPosts]);
   useEffect(() => {
     const timer = setTimeout(() => setTerm(query), 220);
     return () => clearTimeout(timer);
@@ -80,7 +82,7 @@ export default function SearchPage({ source, paused, onOpen }: { source: string;
   }, [status.count, status.initialized, results.loading, load]);
 
   const visible = results.identity === identity ? results : initial(identity);
-  const progress = status.channels.map(channel => `${channel.kind === "video" ? "影片" : "吃瓜"} ${Math.max(0, channel.nextPage - 1)}/${channel.pages ?? "?"} 页`).join(" · ");
+  const progress = status.channels.map(channel => `${channel.kind === "video" ? "视频" : "帖子"} ${Math.max(0, channel.nextPage - 1)}/${channel.pages ?? "?"} 页`).join(" · ");
   return <section className="tv-search" aria-label="首字母搜索">
     <header><h1>搜索</h1></header>
     <div className="tv-search-layout">
@@ -101,15 +103,15 @@ export default function SearchPage({ source, paused, onOpen }: { source: string;
           {status.updatedAt > 0 && <p>最近完整更新：{new Date(status.updatedAt).toLocaleString("zh-CN")}</p>}
         </div>
         <div className="tv-search-actions" data-tv-region="search-catalog-actions" data-tv-columns="2">
-          {status.error && <button data-tv-focus="search:retry-catalog" type="button" onClick={() => void retryCatalog(source)}>重试同步</button>}
-          <button data-tv-focus="search:refresh-catalog" type="button" onClick={() => void retryCatalog(source, true)}>刷新目录</button>
+          {status.error && <button data-tv-focus="search:retry-catalog" type="button" onClick={() => void retryCatalog(source, false, { videos: allowVideos, posts: allowPosts })}>重试同步</button>}
+          <button data-tv-focus="search:refresh-catalog" type="button" onClick={() => void retryCatalog(source, true, { videos: allowVideos, posts: allowPosts })}>刷新目录</button>
         </div>
         {visible.error && <p role="alert">{visible.error}</p>}
         <div className="tv-search-grid" data-tv-region="search-results" data-tv-columns="3" aria-busy={visible.loading}>
           {visible.items.filter(item => !preferences.blockReason(item.tags)).map(item => <button key={contentKey(item)} type="button" className={`tv-card ${item.kind === "post" ? "tv-card-wide" : ""}`} data-tv-focus={`search:${contentKey(item)}`} onClick={() => onOpen(item)}>
             {item.cover && <img src={cover(item.cover)} alt="" loading="lazy" />}
             <span className="tv-card-title">{item.title}</span>
-            <span className="tv-muted">{item.kind === "post" ? "吃瓜视频" : `${item.episodeCount ?? "—"} 集`}</span>
+            <span className="tv-muted">{item.kind === "post" ? "帖子" : `${item.episodeCount ?? "—"} 集`}</span>
           </button>)}
         </div>
         {visible.loading && <p role="status">正在搜索并确认当前页视频…</p>}

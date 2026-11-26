@@ -91,6 +91,8 @@ jobs:
         run: node scripts/check-i18n.mjs
       - name: Documentation links
         run: node scripts/check-doc-links.mjs
+      - name: Shell purity
+        run: node scripts/check-shell-purity.mjs
       - name: Build frontend
         run: pnpm build
       - name: Size budgets

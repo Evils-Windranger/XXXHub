@@ -1,6 +1,8 @@
 //! Atomic on-disk store for installed source packages, rollback versions, and per-source KV state.
 
-use super::manifest::{is_safe_id, semver_gt, SourceCapabilities, SourcePackage};
+use super::manifest::{
+    is_safe_id, semver_gt, SourceCapabilities, SourceCatalogConfig, SourceLinksConfig, SourcePackage,
+};
 use super::verify::SignatureInfo;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -22,6 +24,10 @@ pub struct InstalledSourceSummary {
     pub runtime_kind: String,
     pub origins: Vec<String>,
     pub capabilities: SourceCapabilities,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog: Option<SourceCatalogConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub links: Option<SourceLinksConfig>,
     pub update_urls: Vec<String>,
     pub signature: SignatureInfo,
     pub installed_at: u64,
@@ -70,6 +76,10 @@ struct StoredRecord {
     runtime_kind: String,
     origins: Vec<String>,
     capabilities: SourceCapabilities,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    catalog: Option<SourceCatalogConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    links: Option<SourceLinksConfig>,
     update_urls: Vec<String>,
     signature: SignatureInfo,
     installed_at: u64,
@@ -184,6 +194,8 @@ impl SourceStore {
             runtime_kind: rec.runtime_kind.clone(),
             origins: rec.origins.clone(),
             capabilities: rec.capabilities.clone(),
+            catalog: rec.catalog.clone(),
+            links: rec.links.clone(),
             update_urls: rec.update_urls.clone(),
             signature: rec.signature.clone(),
             installed_at: rec.installed_at,
@@ -270,6 +282,8 @@ impl SourceStore {
             runtime_kind: pkg.manifest.runtime.kind.clone(),
             origins: pkg.manifest.network.origins.clone(),
             capabilities: pkg.manifest.capabilities.clone(),
+            catalog: pkg.manifest.catalog.clone(),
+            links: pkg.manifest.links.clone(),
             update_urls: pkg.update_urls.clone(),
             signature,
             installed_at: unix_secs(),
@@ -278,7 +292,7 @@ impl SourceStore {
         g.packages.insert((id.clone(), pkg.manifest.version.clone()), pkg);
         g.registry.records.insert(id.clone(), rec.clone());
         if activate_if_none && g.registry.active_source_id.is_none() {
-            // Keep built-in default until user explicitly activates, unless caller opts in.
+            // Keep active source unset until user explicitly activates, unless caller opts in.
             g.registry.active_source_id = Some(id.clone());
         }
         Self::save_registry(&g)?;
@@ -328,6 +342,8 @@ impl SourceStore {
             runtime_kind: prev_pkg.manifest.runtime.kind.clone(),
             origins: prev_pkg.manifest.network.origins.clone(),
             capabilities: prev_pkg.manifest.capabilities.clone(),
+            catalog: prev_pkg.manifest.catalog.clone(),
+            links: prev_pkg.manifest.links.clone(),
             update_urls: prev_pkg.update_urls.clone(),
             signature: rec.signature,
             installed_at: unix_secs(),
