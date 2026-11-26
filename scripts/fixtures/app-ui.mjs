@@ -63,10 +63,14 @@ export function installFixture({ theme, titles, metrics = [], metricPages = 1, m
             lines: true,
           },
           catalog: {
+            shortcuts: [
+              { id: "latest", label: "最新上线", icon: "clock" },
+              { id: "featured-pick", label: "精选推荐", icon: "star" },
+            ],
             channels: [
-              { id: "featured", label: "精选频道", sorts: ["latest", "hot_window", "random"] },
-              { id: "archive", label: "片库频道", sorts: ["latest", "hot_window", "random"] },
-              { id: "special", label: "专题频道", sorts: ["全部专题", "热门专题", "最新专题"] },
+              { id: "featured", label: "精选频道", icon: "film", sorts: ["latest", "hot_window", "random"] },
+              { id: "archive", label: "片库频道", icon: "spark", sorts: ["latest", "hot_window", "random"] },
+              { id: "special", label: "专题频道", icon: "award", sorts: ["全部专题", "热门专题", "最新专题"] },
             ],
           },
           updateUrls: [],

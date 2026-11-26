@@ -11,7 +11,7 @@ import { AUTO_LOAD_EMPTY_PAGE_LIMIT, useAutoLoadMore } from "../../shared/lib/us
 import { CollectionLink, CollectionLinks } from "../../shared/ui/CollectionLink";
 import { InplaceSearch } from "../search/InplaceSearch";
 import { Empty } from "../../shared/ui/ui";
-import { IAward, IBack, IChevR, IFilm, IFlame, ILayers, ISearch, ITag, ITrophy, IUserF } from "../../shared/ui/icons";
+import { IAward, IBack, IChevR, IClock, IFilm, IFlame, ILayers, ISearch, ISpark, IStar, ITag, ITrophy, IUserF } from "../../shared/ui/icons";
 import { tr } from "../../shared/i18n";
 import { useTabSwipe } from "../../shared/ui/hooks/useTabSwipe";
 import { VideoSortMenu } from "../../shared/ui/VideoSortMenu";
@@ -19,12 +19,26 @@ import { sortVideosByMetric, type VideoSortDirection, type VideoSortMetric } fro
 
 export const CHANNELS: readonly { cate: string; name: string; Icon: typeof IFilm }[] = [];
 
+function resolveCatalogIcon(icon?: string, fallback: typeof IFilm = IFilm): typeof IFilm {
+  switch (icon?.trim().toLowerCase()) {
+    case "clock": return IClock;
+    case "star": return IStar;
+    case "spark": return ISpark;
+    case "award": return IAward;
+    case "flame": return IFlame;
+    case "film": return IFilm;
+    case "layers": return ILayers;
+    case "trophy": return ITrophy;
+    default: return fallback;
+  }
+}
+
 /** Half-width shortcut used to fit two destinations in one collection cell. */
 function CompactCollectionLink({ icon, title, onClick }: { icon: ReactNode; title: string; onClick: () => void }) {
   return <Button onClick={onClick} aria-label={title}
-    className="ios-collection-link flex w-full min-w-0 min-h-[60px] items-center justify-center gap-1 rounded-[20px] px-1.5 py-2 text-center pressable">
+    className="ios-collection-link ios-compact-collection-link flex w-full h-full min-w-0 items-center justify-center gap-1.5 rounded-[20px] px-2 py-2 text-center overflow-hidden pressable">
     <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] bg-pc text-on-pc">{icon}</span>
-    <span className="whitespace-nowrap text-[12px] font-semibold leading-none text-on">{title}</span>
+    <span className="inline-flex items-center whitespace-nowrap text-[12.5px] font-semibold leading-[1.2] text-on">{title}</span>
   </Button>;
 }
 
@@ -50,6 +64,10 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
   lineEpochRef.current = lineEpoch;
   const retryKeys = useRef(new Set<string>());
 
+  const declaredShortcuts = useMemo(
+    () => (capabilities.catalog.categories ? (activeSource?.catalog?.shortcuts ?? []) : []),
+    [activeSource?.catalog?.shortcuts, capabilities.catalog.categories],
+  );
   const declaredChannels = activeSource?.catalog?.channels;
   const channels = useMemo<ResolvedChannel[]>(() => {
     const activeDeclared = declaredChannels?.filter((ch) =>
@@ -61,7 +79,7 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
         label: ch.label,
         kind: ch.kind === "post" ? "post" : "video",
         sorts: ch.sorts,
-        Icon: ch.kind === "post" ? IFlame : idx === 0 ? IFilm : IAward,
+        Icon: resolveCatalogIcon(ch.icon, ch.kind === "post" ? IFlame : idx === 0 ? IFilm : idx === 1 ? ISpark : IAward),
       }));
     }
     const list: ResolvedChannel[] = [];
@@ -144,7 +162,7 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
   }, [lineEpoch, channels, showDefaultPosts, loadPreview]);
 
   const totalChannels = channels.length + (showDefaultPosts ? 1 : 0);
-  const hasShortcuts = capabilities.catalog.rankings || capabilities.catalog.categories || capabilities.catalog.tags || capabilities.catalog.authors;
+  const hasShortcuts = declaredShortcuts.length > 0 || capabilities.catalog.categories || capabilities.catalog.tags || capabilities.catalog.authors;
 
   return (
     <div className="ios-page absolute inset-0 bg-bg flex flex-col">
@@ -158,26 +176,31 @@ export default function Category({ wide, active }: { wide: boolean; active: bool
       <div className="flex-1 scroll-y pb-24 pt-2">
         {hasShortcuts && (
           <CollectionLinks className="ios-category-links mb-6">
-            {capabilities.catalog.rankings && (
-              <CollectionLink icon={<ITrophy size={18} />} title={tr("排行榜")}
-                onClick={() => push({ kind: "ranks" })} />
-            )}
+            {declaredShortcuts.map((sc, idx) => {
+              const ShortcutIcon = resolveCatalogIcon(sc.icon, idx === 0 ? IClock : IStar);
+              return (
+                <CollectionLink key={sc.id} icon={<ShortcutIcon size={18} />} title={sc.label}
+                  onClick={() => push({ kind: "channel", cate: sc.id, name: sc.label })} />
+              );
+            })}
             {capabilities.catalog.categories && (
               <CollectionLink icon={<ILayers size={18} />} title={tr("专题")}
                 onClick={() => push({ kind: "topics" })} />
             )}
-            {(capabilities.catalog.tags || capabilities.catalog.authors) && (
-              <div className={`grid min-w-0 gap-2 ${capabilities.catalog.tags && capabilities.catalog.authors ? "grid-cols-2" : "grid-cols-1"}`}>
-                {capabilities.catalog.tags && (
-                  <CompactCollectionLink icon={<ITag size={15} />} title={tr("标签")}
-                    onClick={() => push({ kind: "tags" })} />
-                )}
-                {capabilities.catalog.authors && (
-                  <CompactCollectionLink icon={<IUserF size={15} />} title={tr("作者")}
-                    onClick={() => push({ kind: "authors" })} />
-                )}
+            {capabilities.catalog.tags && capabilities.catalog.authors ? (
+              <div className="ios-compact-collection-group grid min-w-0 h-full grid-cols-2 gap-2">
+                <CompactCollectionLink icon={<ITag size={15} />} title={tr("标签")}
+                  onClick={() => push({ kind: "tags" })} />
+                <CompactCollectionLink icon={<IUserF size={15} />} title={tr("作者")}
+                  onClick={() => push({ kind: "authors" })} />
               </div>
-            )}
+            ) : capabilities.catalog.tags ? (
+              <CollectionLink icon={<ITag size={18} />} title={tr("标签")}
+                onClick={() => push({ kind: "tags" })} />
+            ) : capabilities.catalog.authors ? (
+              <CollectionLink icon={<IUserF size={18} />} title={tr("作者")}
+                onClick={() => push({ kind: "authors" })} />
+            ) : null}
           </CollectionLinks>
         )}
 
@@ -294,7 +317,9 @@ export function ChannelPage({ cate, name, onBack, wide, sorts }: {
   const filteringRef = useRef(filtering);
   filteringRef.current = filtering;
   const channelMeta = useMemo(
-    () => activeSource?.catalog?.channels?.find((c) => c.id === cate),
+    () =>
+      activeSource?.catalog?.channels?.find((c) => c.id === cate) ??
+      activeSource?.catalog?.shortcuts?.find((c) => c.id === cate),
     [activeSource, cate],
   );
   const channelSorts = useMemo(

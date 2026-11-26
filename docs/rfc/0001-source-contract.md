@@ -46,8 +46,11 @@
       "imageDecrypt": { "algorithm": "aes-128-cbc", "key": "<16-byte utf8/hex>", "iv": "<16-byte utf8/hex>" }
     },
     "catalog": {
+      "shortcuts": [
+        { "id": "latest", "label": "最新上线", "icon": "clock" }
+      ],
       "channels": [
-        { "id": "featured", "label": "精选频道", "sorts": ["latest", "hot_window", "random"] }
+        { "id": "featured", "label": "精选频道", "icon": "film", "sorts": ["latest", "hot_window", "random"] }
       ]
     },
     "links": {
@@ -72,7 +75,7 @@
 - 签名载荷为跨语言确定性规范文本（覆盖 `id`、`version`、`apiVersion`、`runtime.kind`、三类 origin 列表、`updateUrls`、`imgdec`（`media.imageDecrypt`）及 `sha256(code)`），由 `src-tauri/src/source/verify.rs` 与 `scripts/pack-source.mjs` 共同遵循。
 - **篡改零容忍**：只要带签名但验签失败，无论是否开启「允许自签/测试源」，一律拒绝导入。
 - 纯壳客户端内置 `TRUSTED_KEYS` 为空（不预置官方或站方签名公钥），默认配置 `allow_untrusted = true`，允许自由导入未签名与自签社区源并展示指纹标识；若包内附带 Ed25519 `signature`，仍强制校验签名完整性。
-- 说明：`catalog.authors`、`media.imageDecrypt`、`catalog.channels` 与 `links.videoIdPathPattern` 均为可选字段，向后兼容最小 `schemaVersion: 1` 插件包。
+- 说明：`catalog.authors`、`media.imageDecrypt`、`catalog.shortcuts`、`catalog.channels`（含可选 `icon`）与 `links.videoIdPathPattern` 均为可选字段，向后兼容最小 `schemaVersion: 1` 插件包。
 
 ## 4. Rust Host 原语（v0.1）
 

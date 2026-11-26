@@ -118,6 +118,19 @@ pub struct CatalogChannel {
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sorts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogShortcut {
+    pub id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sorts: Vec<String>,
 }
@@ -125,6 +138,8 @@ pub struct CatalogChannel {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceCatalogConfig {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shortcuts: Vec<CatalogShortcut>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub channels: Vec<CatalogChannel>,
 }
@@ -324,6 +339,33 @@ pub fn validate_package(pkg: &SourcePackage) -> Result<(), String> {
         parse_image_decrypt_bytes(dec)?;
     }
     if let Some(cat) = pkg.manifest.catalog.as_ref() {
+        if cat.shortcuts.len() > 8 {
+            return Err("catalog.shortcuts 数量超出限制（最多 8 个）".into());
+        }
+        for sc in &cat.shortcuts {
+            let sc_id = sc.id.trim();
+            let sc_label = sc.label.trim();
+            if sc_id.is_empty()
+                || sc_id.chars().count() > 64
+                || sc_label.is_empty()
+                || sc_label.chars().count() > 64
+                || sc_label.contains('<')
+                || sc_label.contains('>')
+            {
+                return Err("catalog.shortcuts 条目无效（id 与 label 不能为空、不超过 64 字符且不含 HTML 标签）".into());
+            }
+            if let Some(icon) = sc.icon.as_deref() {
+                let ic = icon.trim();
+                if ic.is_empty() || ic.chars().count() > 24 || ic.contains('<') || ic.contains('>') {
+                    return Err("catalog.shortcuts.icon 无效".into());
+                }
+            }
+            if sc.sorts.len() > 16
+                || sc.sorts.iter().any(|s| s.trim().is_empty() || s.chars().count() > 32)
+            {
+                return Err("catalog.shortcuts.sorts 条目无效".into());
+            }
+        }
         if cat.channels.len() > 24 {
             return Err("catalog.channels 数量超出限制（最多 24 个）".into());
         }
@@ -338,6 +380,12 @@ pub fn validate_package(pkg: &SourcePackage) -> Result<(), String> {
                 || ch_label.contains('>')
             {
                 return Err("catalog.channels 条目无效（id 与 label 不能为空、不超过 64 字符且不含 HTML 标签）".into());
+            }
+            if let Some(icon) = ch.icon.as_deref() {
+                let ic = icon.trim();
+                if ic.is_empty() || ic.chars().count() > 24 || ic.contains('<') || ic.contains('>') {
+                    return Err("catalog.channels.icon 无效".into());
+                }
             }
             if ch.sorts.len() > 16
                 || ch.sorts.iter().any(|s| s.trim().is_empty() || s.chars().count() > 32)

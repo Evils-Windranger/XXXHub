@@ -327,10 +327,19 @@ export type CatalogChannel = {
   id: string;
   label: string;
   kind?: string;
+  icon?: string;
+  sorts?: string[];
+};
+
+export type CatalogShortcut = {
+  id: string;
+  label: string;
+  icon?: string;
   sorts?: string[];
 };
 
 export type SourceCatalogConfig = {
+  shortcuts?: CatalogShortcut[];
   channels?: CatalogChannel[];
 };
 
